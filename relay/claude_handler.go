@@ -128,7 +128,8 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 	}
 
 	var requestBody io.Reader
-	forceCompatibilityConversion := constant.IsOpenAIChatCompletionsOnlyChannelType(info.ChannelType)
+	forceCompatibilityConversion := constant.IsOpenAIChatCompletionsOnlyChannelType(info.ChannelType) ||
+		constant.IsOpenAIResponsesOnlyChannelType(info.ChannelType)
 	if !forceCompatibilityConversion && (model_setting.GetGlobalSettings().PassThroughRequestEnabled || info.ChannelSetting.PassThroughBodyEnabled) {
 		storage, err := common.GetBodyStorage(c)
 		if err != nil {

@@ -319,6 +319,7 @@ var streamSupportedChannels = map[int]bool{
 	constant.ChannelTypeSubmodel:       true,
 	constant.ChannelTypeCodex:          true,
 	constant.ChannelTypeOpenAIChatOnly: true,
+	constant.ChannelTypeOpenAIResponsesOnly: true,
 	constant.ChannelTypeMoonshot:       true,
 	constant.ChannelTypeMiniMax:        true,
 	constant.ChannelTypeSiliconFlow:    true,

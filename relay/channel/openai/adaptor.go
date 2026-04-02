@@ -172,6 +172,11 @@ func (a *Adaptor) GetRequestURL(info *relaycommon.RelayInfo) (string, error) {
 		url = strings.Replace(url, "{model}", info.UpstreamModelName, -1)
 		return url, nil
 	default:
+		if constant.IsOpenAIResponsesOnlyChannelType(info.ChannelType) &&
+			info.GetFinalRequestRelayFormat() == types.RelayFormatOpenAIResponses &&
+			info.RelayMode != relayconstant.RelayModeResponsesCompact {
+			return fmt.Sprintf("%s/v1/responses", info.ChannelBaseUrl), nil
+		}
 		if constant.IsOpenAIChatCompletionsOnlyChannelType(info.ChannelType) &&
 			info.RelayMode == relayconstant.RelayModeResponses {
 			return fmt.Sprintf("%s/v1/chat/completions", info.ChannelBaseUrl), nil
@@ -191,7 +196,9 @@ func (a *Adaptor) SetupRequestHeader(c *gin.Context, header *http.Header, info *
 		header.Set("api-key", info.ApiKey)
 		return nil
 	}
-	if (info.ChannelType == constant.ChannelTypeOpenAI || constant.IsOpenAIChatCompletionsOnlyChannelType(info.ChannelType)) && "" != info.Organization {
+	if (info.ChannelType == constant.ChannelTypeOpenAI ||
+		constant.IsOpenAIChatCompletionsOnlyChannelType(info.ChannelType) ||
+		constant.IsOpenAIResponsesOnlyChannelType(info.ChannelType)) && "" != info.Organization {
 		header.Set("OpenAI-Organization", info.Organization)
 	}
 	// 检查 Header Override 是否已设置 Authorization，如果已设置则跳过默认设置
@@ -245,7 +252,8 @@ func (a *Adaptor) ConvertOpenAIRequest(c *gin.Context, info *relaycommon.RelayIn
 	}
 	if info.ChannelType != constant.ChannelTypeOpenAI &&
 		info.ChannelType != constant.ChannelTypeAzure &&
-		!constant.IsOpenAIChatCompletionsOnlyChannelType(info.ChannelType) {
+		!constant.IsOpenAIChatCompletionsOnlyChannelType(info.ChannelType) &&
+		!constant.IsOpenAIResponsesOnlyChannelType(info.ChannelType) {
 		request.StreamOptions = nil
 	}
 	if info.ChannelType == constant.ChannelTypeOpenRouter {
@@ -359,6 +367,14 @@ func (a *Adaptor) ConvertOpenAIRequest(c *gin.Context, info *relaycommon.RelayIn
 				request.Messages[0].Role = "developer"
 			}
 		}
+	}
+
+	if constant.IsOpenAIResponsesOnlyChannelType(info.ChannelType) {
+		responsesReq, err := service.ChatCompletionsRequestToResponsesRequest(request)
+		if err != nil {
+			return nil, err
+		}
+		return a.ConvertOpenAIResponsesRequest(c, info, *responsesReq)
 	}
 
 	return request, nil
@@ -587,6 +603,12 @@ func detectImageMimeType(filename string) string {
 }
 
 func (a *Adaptor) ConvertOpenAIResponsesRequest(c *gin.Context, info *relaycommon.RelayInfo, request dto.OpenAIResponsesRequest) (any, error) {
+	if info != nil &&
+		(info.RelayFormat == types.RelayFormatOpenAIResponses || info.RelayFormat == types.RelayFormatOpenAIResponsesCompaction) {
+		if err := service.MergeSystemPromptToResponsesRequest(&request, info.ChannelSetting.SystemPrompt, info.ChannelSetting.SystemPromptOverride); err != nil {
+			return nil, err
+		}
+	}
 	if info != nil && constant.IsOpenAIChatCompletionsOnlyChannelType(info.ChannelType) {
 		chatReq, err := service.ResponsesRequestToChatCompletionsRequest(&request)
 		if err != nil {
@@ -626,6 +648,16 @@ func (a *Adaptor) DoRequest(c *gin.Context, info *relaycommon.RelayInfo, request
 }
 
 func (a *Adaptor) DoResponse(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo) (usage any, err *types.NewAPIError) {
+	if info != nil &&
+		info.GetFinalRequestRelayFormat() == types.RelayFormatOpenAIResponses &&
+		info.RelayMode != relayconstant.RelayModeResponses &&
+		info.RelayMode != relayconstant.RelayModeResponsesCompact {
+		if info.IsStream {
+			return OaiResponsesToChatStreamHandler(c, info, resp)
+		}
+		return OaiResponsesToChatHandler(c, info, resp)
+	}
+
 	switch info.RelayMode {
 	case relayconstant.RelayModeRealtime:
 		err, usage = OpenaiRealtimeHandler(c, info)

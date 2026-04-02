@@ -23,7 +23,8 @@ import (
 func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types.NewAPIError) {
 	info.InitChannelMeta(c)
 	if info.RelayMode == relayconstant.RelayModeResponsesCompact {
-		if appconstant.IsOpenAIChatCompletionsOnlyChannelType(info.ChannelType) {
+		if appconstant.IsOpenAIChatCompletionsOnlyChannelType(info.ChannelType) ||
+			appconstant.IsOpenAIResponsesOnlyChannelType(info.ChannelType) {
 			return types.NewErrorWithStatusCode(
 				fmt.Errorf("unsupported endpoint %q for channel type %d", "/v1/responses/compact", info.ChannelType),
 				types.ErrorCodeInvalidRequest,
