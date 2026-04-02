@@ -328,6 +328,7 @@ export function getChannelIcon(channelType) {
 
   switch (channelType) {
     case 1: // OpenAI
+    case 58: // OpenAI Chat Only
     case 3: // Azure OpenAI
     case 57: // Codex
       return <OpenAI size={iconSize} />;

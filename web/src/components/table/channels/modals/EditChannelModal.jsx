@@ -128,10 +128,11 @@ const PARAM_OVERRIDE_OPERATIONS_TEMPLATE = {
 };
 
 const DEPRECATED_DOUBAO_CODING_PLAN_BASE_URL = 'doubao-coding-plan';
+const OPENAI_CHANNEL_TYPES = new Set([1, 58]);
 
 // 支持并且已适配通过接口获取模型列表的渠道类型
 const MODEL_FETCHABLE_TYPES = new Set([
-  1, 4, 14, 34, 17, 26, 27, 24, 47, 25, 20, 23, 31, 40, 42, 48, 43,
+  1, 4, 14, 34, 17, 26, 27, 24, 47, 25, 20, 23, 31, 40, 42, 48, 43, 58,
 ]);
 
 function type2secretPrompt(type) {
@@ -1763,11 +1764,11 @@ const EditChannelModal = (props) => {
       delete settings.vertex_key_type;
     }
 
-    // type === 1 (OpenAI) 或 type === 14 (Claude): 设置字段透传控制（显式保存布尔值）
-    if (localInputs.type === 1 || localInputs.type === 14) {
+    // OpenAI-like 或 Claude: 设置字段透传控制（显式保存布尔值）
+    if (OPENAI_CHANNEL_TYPES.has(localInputs.type) || localInputs.type === 14) {
       settings.allow_service_tier = localInputs.allow_service_tier === true;
-      // 仅 OpenAI 渠道需要 store / safety_identifier / include_obfuscation
-      if (localInputs.type === 1) {
+      // 仅 OpenAI-like 渠道需要 store / safety_identifier / include_obfuscation
+      if (OPENAI_CHANNEL_TYPES.has(localInputs.type)) {
         settings.disable_store = localInputs.disable_store === true;
         settings.allow_safety_identifier =
           localInputs.allow_safety_identifier === true;
@@ -2461,7 +2462,7 @@ const EditChannelModal = (props) => {
                     </Col>
                   </Row>
 
-                  {inputs.type === 1 && (
+                  {OPENAI_CHANNEL_TYPES.has(inputs.type) && (
                     <>
                       <div className='mt-4 mb-2 text-sm font-medium text-gray-700'>
                         {t('字段透传控制')}
@@ -2494,7 +2495,7 @@ const EditChannelModal = (props) => {
                     <Form.Switch field='claude_beta_query' label={t('Claude 强制 beta=true')} checkedText={t('开')} uncheckedText={t('关')} onChange={(value) => handleChannelOtherSettingsChange('claude_beta_query', value)} extraText={t('开启后，该渠道请求 Claude 时将强制追加 ?beta=true（无需客户端手动传参）')} />
                   )}
 
-                  {inputs.type === 1 && (
+                  {OPENAI_CHANNEL_TYPES.has(inputs.type) && (
                     <Form.Switch field='force_format' label={t('强制格式化')} checkedText={t('开')} uncheckedText={t('关')} onChange={(value) => handleChannelSettingsChange('force_format', value)} extraText={t('强制将响应格式化为 OpenAI 标准格式（只适用于OpenAI渠道类型）')} />
                   )}
 
@@ -3198,7 +3199,7 @@ const EditChannelModal = (props) => {
                       />
                     )}
 
-                    {inputs.type === 1 && (
+                    {OPENAI_CHANNEL_TYPES.has(inputs.type) && (
                       <Form.Input
                         field='openai_organization'
                         label={t('组织')}
