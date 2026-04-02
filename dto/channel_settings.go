@@ -7,6 +7,22 @@ type ChannelSettings struct {
 	PassThroughBodyEnabled bool   `json:"pass_through_body_enabled,omitempty"`
 	SystemPrompt           string `json:"system_prompt,omitempty"`
 	SystemPromptOverride   bool   `json:"system_prompt_override,omitempty"`
+	MaxConcurrency         int    `json:"max_concurrency,omitempty"`
+	MaxConcurrencyWait     int    `json:"max_concurrency_wait,omitempty"`
+}
+
+func (s ChannelSettings) GetMaxConcurrency() int {
+	if s.MaxConcurrency < 0 {
+		return 0
+	}
+	return s.MaxConcurrency
+}
+
+func (s ChannelSettings) GetMaxConcurrencyWait() int {
+	if s.MaxConcurrencyWait < 0 {
+		return 0
+	}
+	return s.MaxConcurrencyWait
 }
 
 type VertexKeyType string

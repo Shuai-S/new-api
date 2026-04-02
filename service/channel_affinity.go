@@ -623,6 +623,13 @@ func ShouldSkipRetryAfterChannelAffinityFailure(c *gin.Context) bool {
 	return meta.SkipRetry
 }
 
+func SetChannelAffinitySkipRetry(c *gin.Context, skip bool) {
+	if c == nil {
+		return
+	}
+	c.Set(ginKeyChannelAffinitySkipRetry, skip)
+}
+
 func MarkChannelAffinityUsed(c *gin.Context, selectedGroup string, channelID int) {
 	if c == nil || channelID <= 0 {
 		return

@@ -1,6 +1,6 @@
 # 渠道而外设置说明
 
-该配置用于设置一些额外的渠道参数，可以通过 JSON 对象进行配置。主要包含以下两个设置项：
+该配置用于设置一些额外的渠道参数，可以通过 JSON 对象进行配置。主要包含以下几个设置项：
 
 1. force_format
     - 用于标识是否对数据进行强制格式化为 OpenAI 格式
@@ -14,6 +14,15 @@
    - 用于标识是否将思考内容`reasoning_content`转换为`<think>`标签拼接到内容中返回
    - 类型为布尔值，设置为 true 时启用思考内容转换
 
+4. max_concurrency
+   - 用于限制单个渠道的最大并发请求数
+   - 类型为整数，设置为 0 或不填表示不限制
+
+5. max_concurrency_wait
+   - 用于设置单个渠道在并发已满时的等待时间，单位为毫秒
+   - 类型为整数，设置为 0 或不填表示不等待
+   - 仅对首选渠道生效；若等待超时仍未释放并发槽，再切换到其它可用渠道
+
 --------------------------------------------------------------
 
 ## JSON 格式示例
@@ -23,8 +32,10 @@
 ```json
 {
     "force_format": true,
-   "thinking_to_content": true,
-    "proxy": "socks5://xxxxxxx"
+    "thinking_to_content": true,
+    "proxy": "socks5://xxxxxxx",
+    "max_concurrency": 8,
+    "max_concurrency_wait": 2000
 }
 ```
 

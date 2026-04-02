@@ -849,6 +849,12 @@ func (channel *Channel) ValidateSettings() error {
 			return err
 		}
 	}
+	if channelParams.MaxConcurrency < 0 {
+		return errors.New("max_concurrency must be greater than or equal to 0")
+	}
+	if channelParams.MaxConcurrencyWait < 0 {
+		return errors.New("max_concurrency_wait must be greater than or equal to 0")
+	}
 	return nil
 }
 
