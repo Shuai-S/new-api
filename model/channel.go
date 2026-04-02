@@ -852,6 +852,17 @@ func (channel *Channel) ValidateSettings() error {
 	return nil
 }
 
+func (channel *Channel) ValidateOtherSettings() error {
+	setting := dto.ChannelOtherSettings{}
+	if channel.OtherSettings == "" {
+		return nil
+	}
+	if err := common.UnmarshalJsonStr(channel.OtherSettings, &setting); err != nil {
+		return err
+	}
+	return setting.Validate()
+}
+
 func (channel *Channel) GetSetting() dto.ChannelSettings {
 	setting := dto.ChannelSettings{}
 	if channel.Setting != nil && *channel.Setting != "" {
@@ -884,6 +895,7 @@ func (channel *Channel) GetOtherSettings() dto.ChannelOtherSettings {
 			_ = channel.Save()           // 保存修改
 		}
 	}
+	setting.AllowedEndpointTypes = setting.GetAllowedEndpointTypes()
 	return setting
 }
 

@@ -96,6 +96,18 @@ const STATUS_CODE_MAPPING_EXAMPLE = {
   400: '500',
 };
 
+const ENDPOINT_FILTER_OPTION_LIST = [
+  { label: 'openai', value: 'openai' },
+  { label: 'openai-response', value: 'openai-response' },
+  { label: 'openai-response-compact', value: 'openai-response-compact' },
+  { label: 'anthropic', value: 'anthropic' },
+  { label: 'gemini', value: 'gemini' },
+  { label: 'jina-rerank', value: 'jina-rerank' },
+  { label: 'image-generation', value: 'image-generation' },
+  { label: 'embeddings', value: 'embeddings' },
+  { label: 'openai-video', value: 'openai-video' },
+];
+
 const REGION_EXAMPLE = {
   default: 'global',
   'gemini-1.5-pro-002': 'europe-west2',
@@ -202,6 +214,8 @@ const EditChannelModal = (props) => {
     aws_key_type: 'ak_sk',
     // 企业账户设置
     is_enterprise_account: false,
+    endpoint_filter_enabled: false,
+    allowed_endpoint_types: [],
     // 字段透传控制默认值
     allow_service_tier: false,
     disable_store: false, // false = 允许透传（默认开启）
@@ -881,6 +895,17 @@ const EditChannelModal = (props) => {
           // 读取企业账户设置
           data.is_enterprise_account =
             parsedSettings.openrouter_enterprise === true;
+          data.endpoint_filter_enabled =
+            parsedSettings.endpoint_filter_enabled === true;
+          data.allowed_endpoint_types = Array.isArray(
+            parsedSettings.allowed_endpoint_types,
+          )
+            ? parsedSettings.allowed_endpoint_types
+                .map((item) =>
+                  typeof item === 'string' ? item.trim() : String(item || ''),
+                )
+                .filter(Boolean)
+            : [];
           // 读取字段透传控制设置
           data.allow_service_tier = parsedSettings.allow_service_tier || false;
           data.disable_store = parsedSettings.disable_store || false;
@@ -914,6 +939,8 @@ const EditChannelModal = (props) => {
           data.vertex_key_type = 'json';
           data.aws_key_type = 'ak_sk';
           data.is_enterprise_account = false;
+          data.endpoint_filter_enabled = false;
+          data.allowed_endpoint_types = [];
           data.allow_service_tier = false;
           data.disable_store = false;
           data.allow_safety_identifier = false;
@@ -931,6 +958,8 @@ const EditChannelModal = (props) => {
         data.vertex_key_type = 'json';
         data.aws_key_type = 'ak_sk';
         data.is_enterprise_account = false;
+        data.endpoint_filter_enabled = false;
+        data.allowed_endpoint_types = [];
         data.allow_service_tier = false;
         data.disable_store = false;
         data.allow_safety_identifier = false;
@@ -1011,6 +1040,9 @@ const EditChannelModal = (props) => {
         (data.weight && data.weight !== 0) ||
         (data.proxy && data.proxy.trim()) ||
         (data.system_prompt && data.system_prompt.trim()) ||
+        data.endpoint_filter_enabled ||
+        (Array.isArray(data.allowed_endpoint_types) &&
+          data.allowed_endpoint_types.length > 0) ||
         data.thinking_to_content ||
         data.pass_through_body_enabled ||
         data.force_format ||
@@ -1751,6 +1783,20 @@ const EditChannelModal = (props) => {
         localInputs.is_enterprise_account === true;
     }
 
+    settings.endpoint_filter_enabled =
+      localInputs.endpoint_filter_enabled === true;
+    settings.allowed_endpoint_types = Array.from(
+      new Set(
+        (localInputs.allowed_endpoint_types || [])
+          .map((endpoint) =>
+            typeof endpoint === 'string'
+              ? endpoint.trim()
+              : String(endpoint || '').trim(),
+          )
+          .filter(Boolean),
+      ),
+    );
+
     // type === 33 (AWS): 保存 aws_key_type 到 settings
     if (localInputs.type === 33) {
       settings.aws_key_type = localInputs.aws_key_type || 'ak_sk';
@@ -1813,6 +1859,8 @@ const EditChannelModal = (props) => {
     delete localInputs.system_prompt;
     delete localInputs.system_prompt_override;
     delete localInputs.is_enterprise_account;
+    delete localInputs.endpoint_filter_enabled;
+    delete localInputs.allowed_endpoint_types;
     // 顶层的 vertex_key_type 不应发送给后端
     delete localInputs.vertex_key_type;
     // 顶层的 aws_key_type 不应发送给后端
@@ -2276,6 +2324,45 @@ const EditChannelModal = (props) => {
                   </div>
                 </div>
                 )}
+
+                <div className='py-3 border-b border-gray-100'>
+                  <Text className='text-sm font-medium text-gray-500 mb-3 block'>
+                    {t('端点过滤')}
+                  </Text>
+
+                  <Form.Switch
+                    field='endpoint_filter_enabled'
+                    label={t('启用端点过滤')}
+                    checkedText={t('开')}
+                    uncheckedText={t('关')}
+                    onChange={(value) =>
+                      handleChannelOtherSettingsChange(
+                        'endpoint_filter_enabled',
+                        value,
+                      )
+                    }
+                    extraText={t(
+                      '开启后，该渠道只会参与所选端点的分发。需要同时启用全局“渠道 Endpoint 过滤”开关才会生效。',
+                    )}
+                  />
+                  <Form.Select
+                    field='allowed_endpoint_types'
+                    label={t('允许的端点')}
+                    placeholder={t('请选择该渠道允许处理的端点')}
+                    multiple
+                    disabled={!inputs.endpoint_filter_enabled}
+                    optionList={ENDPOINT_FILTER_OPTION_LIST}
+                    onChange={(value) =>
+                      handleChannelOtherSettingsChange(
+                        'allowed_endpoint_types',
+                        Array.isArray(value) ? value : [],
+                      )
+                    }
+                    extraText={t(
+                      '未选择任何端点时，即使启用了过滤，也不会限制渠道分发。',
+                    )}
+                  />
+                </div>
 
                 {/* Request Config Section */}
                 <div className='py-3 border-b border-gray-100'>

@@ -36,6 +36,7 @@ func Distribute() func(c *gin.Context) {
 			abortWithOpenAiMessage(c, http.StatusBadRequest, i18n.T(c, i18n.MsgDistributorInvalidRequest, map[string]any{"Error": err.Error()}))
 			return
 		}
+		requestEndpointType := common.Path2EndpointType(c.Request.URL.Path)
 		if ok {
 			id, err := strconv.Atoi(channelId.(string))
 			if err != nil {
@@ -49,6 +50,10 @@ func Distribute() func(c *gin.Context) {
 			}
 			if channel.Status != common.ChannelStatusEnabled {
 				abortWithOpenAiMessage(c, http.StatusForbidden, i18n.T(c, i18n.MsgDistributorChannelDisabled))
+				return
+			}
+			if !model.IsChannelAllowedForEndpoint(channel, requestEndpointType) {
+				abortWithOpenAiMessage(c, http.StatusForbidden, formatChannelEndpointBlockedMessage(channel, requestEndpointType, c.Request.URL.Path))
 				return
 			}
 		} else {
@@ -111,7 +116,8 @@ func Distribute() func(c *gin.Context) {
 							userGroup := common.GetContextKeyString(c, constant.ContextKeyUserGroup)
 							autoGroups := service.GetUserAutoGroup(userGroup)
 							for _, g := range autoGroups {
-								if model.IsChannelEnabledForGroupModel(g, modelRequest.Model, preferred.Id) {
+								if model.IsChannelEnabledForGroupModel(g, modelRequest.Model, preferred.Id) &&
+									model.IsChannelAllowedForEndpoint(preferred, requestEndpointType) {
 									selectGroup = g
 									common.SetContextKey(c, constant.ContextKeyAutoGroup, g)
 									channel = preferred
@@ -119,7 +125,8 @@ func Distribute() func(c *gin.Context) {
 									break
 								}
 							}
-						} else if model.IsChannelEnabledForGroupModel(usingGroup, modelRequest.Model, preferred.Id) {
+						} else if model.IsChannelEnabledForGroupModel(usingGroup, modelRequest.Model, preferred.Id) &&
+							model.IsChannelAllowedForEndpoint(preferred, requestEndpointType) {
 							channel = preferred
 							selectGroup = usingGroup
 							service.MarkChannelAffinityUsed(c, usingGroup, preferred.Id)
@@ -129,10 +136,11 @@ func Distribute() func(c *gin.Context) {
 
 				if channel == nil {
 					channel, selectGroup, err = service.CacheGetRandomSatisfiedChannel(&service.RetryParam{
-						Ctx:        c,
-						ModelName:  modelRequest.Model,
-						TokenGroup: usingGroup,
-						Retry:      common.GetPointer(0),
+						Ctx:                 c,
+						ModelName:           modelRequest.Model,
+						TokenGroup:          usingGroup,
+						RequestEndpointType: requestEndpointType,
+						Retry:               common.GetPointer(0),
 					})
 					if err != nil {
 						showGroup := usingGroup
@@ -404,6 +412,13 @@ func SetupContextForSelectedChannel(c *gin.Context, channel *model.Channel, mode
 		c.Set("bot_id", channel.Other)
 	}
 	return nil
+}
+
+func formatChannelEndpointBlockedMessage(channel *model.Channel, endpointType constant.EndpointType, requestPath string) string {
+	if endpointType != "" {
+		return fmt.Sprintf("渠道 %s 不支持当前端点 %s", channel.Name, endpointType)
+	}
+	return fmt.Sprintf("渠道 %s 不支持当前请求路径 %s", channel.Name, requestPath)
 }
 
 // extractModelNameFromGeminiPath 从 Gemini API URL 路径中提取模型名
