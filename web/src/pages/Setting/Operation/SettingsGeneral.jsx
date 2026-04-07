@@ -32,6 +32,7 @@ import {
 import {
   compareObjects,
   API,
+  setStatusData,
   showError,
   showSuccess,
   showWarning,
@@ -85,15 +86,21 @@ export default function GeneralSettings(props) {
     });
     setLoading(true);
     Promise.all(requestQueue)
-      .then((res) => {
+      .then(async (res) => {
         if (requestQueue.length === 1) {
           if (res.includes(undefined)) return;
         } else if (requestQueue.length > 1) {
           if (res.includes(undefined))
             return showError(t('部分保存失败，请重试'));
         }
+        await props.refresh?.();
+        try {
+          const statusRes = await API.get('/api/status');
+          if (statusRes.data?.success && statusRes.data?.data) {
+            setStatusData(statusRes.data.data);
+          }
+        } catch (error) {}
         showSuccess(t('保存成功'));
-        props.refresh();
       })
       .catch(() => {
         showError(t('保存失败，请重试'));
