@@ -260,6 +260,24 @@ func UpdateOption(c *gin.Context) {
 			})
 			return
 		}
+	case "monitor_setting.test_param_override":
+		err = operation_setting.ValidateMonitorJSONObject(option.Value.(string), "全局测试参数覆盖")
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": err.Error(),
+			})
+			return
+		}
+	case "monitor_setting.test_header_override":
+		err = operation_setting.ValidateMonitorJSONObject(option.Value.(string), "全局测试请求头覆盖")
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": err.Error(),
+			})
+			return
+		}
 	case "console_setting.api_info":
 		err = console_setting.ValidateConsoleSettings(option.Value.(string), "ApiInfo")
 		if err != nil {

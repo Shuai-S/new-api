@@ -22,12 +22,12 @@ export const CHANNEL_OPTIONS = [
   {
     value: 58,
     color: 'green',
-    label: 'OpenAI Chat Only (Responses Compat)',
+    label: 'OpenAI Chat Only',
   },
   {
     value: 59,
     color: 'green',
-    label: 'OpenAI Responses Only (Chat Compat)',
+    label: 'OpenAI Responses Only',
   },
   {
     value: 2,

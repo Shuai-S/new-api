@@ -26,25 +26,58 @@ import {
   showSuccess,
   showWarning,
   parseHttpStatusCodeRules,
+  verifyJSON,
 } from '../../../helpers';
 import { useTranslation } from 'react-i18next';
 import HttpStatusCodeRulesInput from '../../../components/settings/HttpStatusCodeRulesInput';
 
+const defaultMonitoringInputs = {
+  ChannelDisableThreshold: '',
+  QuotaRemindThreshold: '',
+  AutomaticDisableChannelEnabled: false,
+  AutomaticEnableChannelEnabled: false,
+  AutomaticDisableKeywords: '',
+  AutomaticDisableStatusCodes: '401',
+  AutomaticRetryStatusCodes:
+    '100-199,300-399,401-407,409-499,500-503,505-523,525-599',
+  'monitor_setting.auto_test_channel_enabled': false,
+  'monitor_setting.auto_test_channel_minutes': 10,
+  'monitor_setting.test_param_override': '',
+  'monitor_setting.test_header_override': '',
+};
+
+function validateJSONObjectInput(rawValue, fieldLabel) {
+  const trimmed = typeof rawValue === 'string' ? rawValue.trim() : '';
+  if (trimmed === '') {
+    return { ok: true, value: '' };
+  }
+  if (!verifyJSON(trimmed)) {
+    return {
+      ok: false,
+      message: `${fieldLabel}必须是合法的 JSON 对象`,
+    };
+  }
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (!parsed || Array.isArray(parsed) || typeof parsed !== 'object') {
+      return {
+        ok: false,
+        message: `${fieldLabel}必须是合法的 JSON 对象`,
+      };
+    }
+  } catch (error) {
+    return {
+      ok: false,
+      message: `${fieldLabel}必须是合法的 JSON 对象`,
+    };
+  }
+  return { ok: true, value: trimmed };
+}
+
 export default function SettingsMonitoring(props) {
   const { t } = useTranslation();
   const [loading, setLoading] = useState(false);
-  const [inputs, setInputs] = useState({
-    ChannelDisableThreshold: '',
-    QuotaRemindThreshold: '',
-    AutomaticDisableChannelEnabled: false,
-    AutomaticEnableChannelEnabled: false,
-    AutomaticDisableKeywords: '',
-    AutomaticDisableStatusCodes: '401',
-    AutomaticRetryStatusCodes:
-      '100-199,300-399,401-407,409-499,500-503,505-523,525-599',
-    'monitor_setting.auto_test_channel_enabled': false,
-    'monitor_setting.auto_test_channel_minutes': 10,
-  });
+  const [inputs, setInputs] = useState(defaultMonitoringInputs);
   const refForm = useRef();
   const [inputsRow, setInputsRow] = useState(inputs);
   const parsedAutoDisableStatusCodes = parseHttpStatusCodeRules(
@@ -73,6 +106,20 @@ export default function SettingsMonitoring(props) {
           : '';
       return showError(`${t('自动重试状态码格式不正确')}${details}`);
     }
+    const globalTestParamOverrideValidation = validateJSONObjectInput(
+      inputs['monitor_setting.test_param_override'],
+      t('全局测试参数覆盖'),
+    );
+    if (!globalTestParamOverrideValidation.ok) {
+      return showError(globalTestParamOverrideValidation.message);
+    }
+    const globalTestHeaderOverrideValidation = validateJSONObjectInput(
+      inputs['monitor_setting.test_header_override'],
+      t('全局测试请求头覆盖'),
+    );
+    if (!globalTestHeaderOverrideValidation.ok) {
+      return showError(globalTestHeaderOverrideValidation.message);
+    }
     const requestQueue = updateArray.map((item) => {
       let value = '';
       if (typeof inputs[item.key] === 'boolean') {
@@ -81,6 +128,10 @@ export default function SettingsMonitoring(props) {
         const normalizedMap = {
           AutomaticDisableStatusCodes: parsedAutoDisableStatusCodes.normalized,
           AutomaticRetryStatusCodes: parsedAutoRetryStatusCodes.normalized,
+          'monitor_setting.test_param_override':
+            globalTestParamOverrideValidation.value,
+          'monitor_setting.test_header_override':
+            globalTestHeaderOverrideValidation.value,
         };
         value = normalizedMap[item.key] ?? inputs[item.key];
       }
@@ -110,9 +161,9 @@ export default function SettingsMonitoring(props) {
   }
 
   useEffect(() => {
-    const currentInputs = {};
+    const currentInputs = { ...defaultMonitoringInputs };
     for (let key in props.options) {
-      if (Object.keys(inputs).includes(key)) {
+      if (Object.prototype.hasOwnProperty.call(defaultMonitoringInputs, key)) {
         currentInputs[key] = props.options[key];
       }
     }
@@ -230,6 +281,59 @@ export default function SettingsMonitoring(props) {
                     setInputs({
                       ...inputs,
                       AutomaticEnableChannelEnabled: value,
+                    })
+                  }
+                />
+              </Col>
+            </Row>
+            <Row gutter={16}>
+              <Col xs={24} md={12}>
+                <Form.TextArea
+                  label={t('全局测试参数覆盖')}
+                  placeholder={
+                    '{\n' +
+                    '  "operations": [\n' +
+                    '    {\n' +
+                    '      "mode": "set",\n' +
+                    '      "path": "messages.0.content",\n' +
+                    '      "value": "请只回复 ok",\n' +
+                    '      "conditions": [\n' +
+                    '        { "path": "is_channel_test", "mode": "full", "value": true }\n' +
+                    '      ]\n' +
+                    '    }\n' +
+                    '  ]\n' +
+                    '}'
+                  }
+                  extraText={t(
+                    '仅对通道测试生效，不影响正常 API 请求。支持使用 Param Override 规则统一改写测试请求体。',
+                  )}
+                  field={'monitor_setting.test_param_override'}
+                  autosize={{ minRows: 8, maxRows: 16 }}
+                  onChange={(value) =>
+                    setInputs({
+                      ...inputs,
+                      'monitor_setting.test_param_override': value,
+                    })
+                  }
+                />
+              </Col>
+              <Col xs={24} md={12}>
+                <Form.TextArea
+                  label={t('全局测试请求头覆盖')}
+                  placeholder={
+                    '{\n' +
+                    '  "User-Agent": "new-api-channel-test/1.0"\n' +
+                    '}'
+                  }
+                  extraText={t(
+                    '仅对通道测试生效，不影响正常 API 请求。通道自身测试请求头覆盖会优先于这里的同名字段。',
+                  )}
+                  field={'monitor_setting.test_header_override'}
+                  autosize={{ minRows: 8, maxRows: 16 }}
+                  onChange={(value) =>
+                    setInputs({
+                      ...inputs,
+                      'monitor_setting.test_header_override': value,
                     })
                   }
                 />

@@ -59,6 +59,67 @@ func normalizeChannelTestEndpoint(channel *model.Channel, modelName, endpointTyp
 	return normalized
 }
 
+func mergeChannelTestOverrideMaps(base, override map[string]interface{}) map[string]interface{} {
+	if len(base) == 0 && len(override) == 0 {
+		return nil
+	}
+
+	merged := make(map[string]interface{}, len(base)+len(override))
+	for key, value := range base {
+		merged[key] = value
+	}
+	for key, value := range override {
+		merged[key] = value
+	}
+	return merged
+}
+
+func applyChannelTestParamOverride(info *relaycommon.RelayInfo, jsonData []byte, paramOverride map[string]interface{}) ([]byte, error) {
+	if len(paramOverride) == 0 {
+		return jsonData, nil
+	}
+
+	originalParamOverride := info.ParamOverride
+	info.ParamOverride = paramOverride
+	defer func() {
+		info.ParamOverride = originalParamOverride
+	}()
+
+	return relaycommon.ApplyParamOverrideWithRelayInfo(jsonData, info)
+}
+
+func applyGlobalAndChannelTestParamOverrides(info *relaycommon.RelayInfo, jsonData []byte, globalParamOverride map[string]interface{}) ([]byte, error) {
+	var err error
+	channelParamOverride := info.ParamOverride
+
+	jsonData, err = applyChannelTestParamOverride(info, jsonData, globalParamOverride)
+	if err != nil {
+		return nil, err
+	}
+
+	jsonData, err = applyChannelTestParamOverride(info, jsonData, channelParamOverride)
+	if err != nil {
+		return nil, err
+	}
+
+	return jsonData, nil
+}
+
+func newChannelTestParamOverrideResult(c *gin.Context, err error) testResult {
+	if fixedErr, ok := relaycommon.AsParamOverrideReturnError(err); ok {
+		return testResult{
+			context:     c,
+			localErr:    fixedErr,
+			newAPIError: relaycommon.NewAPIErrorFromParamOverride(fixedErr),
+		}
+	}
+	return testResult{
+		context:     c,
+		localErr:    err,
+		newAPIError: types.NewError(err, types.ErrorCodeChannelParamOverrideInvalid),
+	}
+}
+
 func testChannel(channel *model.Channel, testModel string, endpointType string, isStream bool) testResult {
 	tik := time.Now()
 	var unsupportedTestChannelTypes = []int{
@@ -235,6 +296,20 @@ func testChannel(channel *model.Channel, testModel string, endpointType string, 
 	info.IsChannelTest = true
 	info.InitChannelMeta(c)
 
+	globalTestHeaderOverride, err := operation_setting.GetMonitorSetting().GetTestHeaderOverrideMap()
+	if err != nil {
+		return testResult{
+			context:     c,
+			localErr:    err,
+			newAPIError: types.NewError(err, types.ErrorCodeChannelHeaderOverrideInvalid),
+		}
+	}
+	globalTestParamOverride, err := operation_setting.GetMonitorSetting().GetTestParamOverrideMap()
+	if err != nil {
+		return newChannelTestParamOverrideResult(c, err)
+	}
+	info.HeadersOverride = mergeChannelTestOverrideMaps(globalTestHeaderOverride, info.HeadersOverride)
+
 	err = helper.ModelMappedHelper(c, info, request)
 	if err != nil {
 		return testResult{
@@ -388,21 +463,10 @@ func testChannel(channel *model.Channel, testModel string, endpointType string, 
 	//	}
 	//}
 
-	if len(info.ParamOverride) > 0 {
-		jsonData, err = relaycommon.ApplyParamOverrideWithRelayInfo(jsonData, info)
+	if len(globalTestParamOverride) > 0 || len(info.ParamOverride) > 0 {
+		jsonData, err = applyGlobalAndChannelTestParamOverrides(info, jsonData, globalTestParamOverride)
 		if err != nil {
-			if fixedErr, ok := relaycommon.AsParamOverrideReturnError(err); ok {
-				return testResult{
-					context:     c,
-					localErr:    fixedErr,
-					newAPIError: relaycommon.NewAPIErrorFromParamOverride(fixedErr),
-				}
-			}
-			return testResult{
-				context:     c,
-				localErr:    err,
-				newAPIError: types.NewError(err, types.ErrorCodeChannelParamOverrideInvalid),
-			}
+			return newChannelTestParamOverrideResult(c, err)
 		}
 	}
 
