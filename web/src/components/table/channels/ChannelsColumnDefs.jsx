@@ -27,7 +27,6 @@ import {
   SplitButtonGroup,
   Tag,
   Tooltip,
-  Typography,
 } from '@douyinfe/semi-ui';
 import {
   timestamp2string,
@@ -41,6 +40,7 @@ import {
 } from '../../../helpers';
 import {
   CHANNEL_OPTIONS,
+  getChannelSourceUrl,
   MODEL_FETCHABLE_CHANNEL_TYPES,
 } from '../../../constants';
 import { parseUpstreamUpdateMeta } from '../../../hooks/channels/upstreamUpdateUtils';
@@ -339,6 +339,8 @@ export const getChannelsColumns = ({
       title: t('名称'),
       dataIndex: 'name',
       render: (text, record, index) => {
+        const sourceUrl =
+          record?.children === undefined ? getChannelSourceUrl(record) : '';
         const passThroughEnabled = isRequestPassThroughEnabled(record);
         const upstreamUpdateMeta = getUpstreamUpdateMeta(record);
         const pendingAddCount = upstreamUpdateMeta.pendingAddModels.length;
@@ -348,39 +350,68 @@ export const getChannelsColumns = ({
           upstreamUpdateMeta.supported &&
           upstreamUpdateMeta.enabled &&
           (pendingAddCount > 0 || pendingRemoveCount > 0);
-        const nameNode =
+        const nameLabel = sourceUrl ? (
+          <a
+            href={sourceUrl}
+            target='_blank'
+            rel='noopener noreferrer'
+            className='hover:opacity-80'
+            style={{ color: 'var(--semi-color-link)' }}
+            onClick={(e) => {
+              e.stopPropagation();
+            }}
+          >
+            {text}
+          </a>
+        ) : (
+          <span>{text}</span>
+        );
+        const tooltipContent =
           record.remark && record.remark.trim() !== '' ? (
-            <Tooltip
-              content={
-                <div className='flex flex-col gap-2 max-w-xs'>
-                  <div className='text-sm'>{record.remark}</div>
-                  <Button
-                    size='small'
-                    type='primary'
-                    theme='outline'
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      navigator.clipboard
-                        .writeText(record.remark)
-                        .then(() => {
-                          showSuccess(t('复制成功'));
-                        })
-                        .catch(() => {
-                          showError(t('复制失败'));
-                        });
-                    }}
-                  >
-                    {t('复制')}
-                  </Button>
+            <div className='flex flex-col gap-2 max-w-xs'>
+              <div className='text-sm whitespace-pre-wrap break-words'>
+                {record.remark}
+              </div>
+              {sourceUrl && (
+                <div className='text-sm break-all'>
+                  {sourceUrl}
                 </div>
-              }
+              )}
+              <Button
+                size='small'
+                type='primary'
+                theme='outline'
+                onClick={(e) => {
+                  e.stopPropagation();
+                  navigator.clipboard
+                    .writeText(record.remark)
+                    .then(() => {
+                      showSuccess(t('复制成功'));
+                    })
+                    .catch(() => {
+                      showError(t('复制失败'));
+                    });
+                }}
+              >
+                {t('复制')}
+              </Button>
+            </div>
+          ) : sourceUrl ? (
+            <div className='max-w-xs text-sm break-all'>
+              {sourceUrl}
+            </div>
+          ) : null;
+        const nameNode =
+          tooltipContent ? (
+            <Tooltip
+              content={tooltipContent}
               trigger='hover'
               position='topLeft'
             >
-              <span>{text}</span>
+              <span>{nameLabel}</span>
             </Tooltip>
           ) : (
-            <span>{text}</span>
+            nameLabel
           );
 
         if (!passThroughEnabled && !showUpstreamUpdateTag) {
