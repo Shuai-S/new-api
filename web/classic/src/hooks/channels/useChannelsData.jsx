@@ -442,18 +442,23 @@ export const useChannelsData = () => {
   // Channel management
   const manageChannel = async (id, action, record, value) => {
     let data = { id };
+    let nextStatus;
     let res;
     switch (action) {
       case 'delete':
         res = await API.delete(`/api/channel/${id}/`);
         break;
       case 'enable':
-        data.status = 1;
-        res = await API.put('/api/channel/', data);
+        nextStatus = 1;
+        res = await API.post(`/api/channel/${id}/status`, {
+          status: nextStatus,
+        });
         break;
       case 'disable':
-        data.status = 2;
-        res = await API.put('/api/channel/', data);
+        nextStatus = 2;
+        res = await API.post(`/api/channel/${id}/status`, {
+          status: nextStatus,
+        });
         break;
       case 'priority':
         if (value === '') return;
@@ -475,10 +480,14 @@ export const useChannelsData = () => {
     const { success, message } = res.data;
     if (success) {
       showSuccess(t('操作成功完成！'));
-      let channel = res.data.data;
       let newChannels = [...channels];
       if (action !== 'delete') {
-        record.status = channel.status;
+        if (nextStatus !== undefined) {
+          record.status = nextStatus;
+        } else {
+          let channel = res.data.data;
+          record.status = channel.status;
+        }
       }
       setChannels(newChannels);
     } else {
