@@ -351,6 +351,12 @@ func shouldRetry(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int) b
 	if operation_setting.IsAlwaysSkipRetryCode(openaiErr.GetErrorCode()) {
 		return false
 	}
+	if operation_setting.IsAlwaysSkipRetryStatusCode(code) {
+		return false
+	}
+	if operation_setting.ShouldRetryByKeyword(openaiErr.Error()) {
+		return true
+	}
 	return operation_setting.ShouldRetryByStatusCode(code)
 }
 

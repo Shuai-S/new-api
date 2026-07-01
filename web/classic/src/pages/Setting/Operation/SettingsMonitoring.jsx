@@ -42,6 +42,7 @@ export default function SettingsMonitoring(props) {
     AutomaticDisableStatusCodes: '401',
     AutomaticRetryStatusCodes:
       '100-199,300-399,401-407,409-499,500-503,505-523,525-599',
+    AutomaticRetryKeywords: '',
     'monitor_setting.auto_test_channel_enabled': false,
     'monitor_setting.auto_test_channel_minutes': 10,
   });
@@ -262,6 +263,18 @@ export default function SettingsMonitoring(props) {
                   }
                   parsed={parsedAutoRetryStatusCodes}
                   invalidText={t('自动重试状态码格式不正确')}
+                />
+                <Form.TextArea
+                  label={t('自动重试关键词')}
+                  placeholder={t('一行一个，不区分大小写')}
+                  extraText={t(
+                    '当上游通道返回错误中包含这些关键词时（不区分大小写），符合条件的失败请求将自动重试',
+                  )}
+                  field={'AutomaticRetryKeywords'}
+                  autosize={{ minRows: 4, maxRows: 10 }}
+                  onChange={(value) =>
+                    setInputs({ ...inputs, AutomaticRetryKeywords: value })
+                  }
                 />
                 <Form.TextArea
                   label={t('自动禁用关键词')}

@@ -4214,6 +4214,8 @@
     "并确认自行承担部署": "confirm that I bear legal responsibility arising from deployment",
     "运营和收费行为产生的法律责任": "operation and charging behavior",
     "，": ", ",
-    "、": ", "
+    "、": ", ",
+    "自动重试关键词": "Từ khóa tự động thử lại",
+    "当上游通道返回错误中包含这些关键词时（不区分大小写），符合条件的失败请求将自动重试": "Nếu lỗi kênh upstream chứa bất kỳ từ khóa nào trong số này (không phân biệt chữ hoa chữ thường), các yêu cầu lỗi đủ điều kiện sẽ được thử lại"
   }
 }

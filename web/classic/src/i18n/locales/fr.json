@@ -3680,6 +3680,8 @@
     "并确认自行承担部署": "confirm that I bear legal responsibility arising from deployment",
     "运营和收费行为产生的法律责任": "operation and charging behavior",
     "，": ", ",
-    "、": ", "
+    "、": ", ",
+    "自动重试关键词": "Mots-clés de nouvelle tentative automatique",
+    "当上游通道返回错误中包含这些关键词时（不区分大小写），符合条件的失败请求将自动重试": "Si une erreur du canal amont contient l’un de ces mots-clés (sans tenir compte de la casse), les requêtes en échec éligibles seront réessayées"
   }
 }

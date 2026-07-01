@@ -85,3 +85,15 @@ func TestIsAlwaysSkipRetryStatusCode(t *testing.T) {
 	require.True(t, IsAlwaysSkipRetryStatusCode(524))
 	require.False(t, IsAlwaysSkipRetryStatusCode(500))
 }
+
+func TestAutomaticRetryKeywordsFromString(t *testing.T) {
+	orig := AutomaticRetryKeywords
+	t.Cleanup(func() { AutomaticRetryKeywords = orig })
+
+	AutomaticRetryKeywordsFromString("  Temporarily Unavailable  \n\nOVERLOADED\n")
+
+	require.Equal(t, []string{"temporarily unavailable", "overloaded"}, AutomaticRetryKeywords)
+	require.True(t, ShouldRetryByKeyword("upstream is TEMPORARILY unavailable"))
+	require.True(t, ShouldRetryByKeyword("provider overloaded, try later"))
+	require.False(t, ShouldRetryByKeyword("invalid request"))
+}
