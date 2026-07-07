@@ -40,14 +40,14 @@ jobs:
           fi
 
           SHA=$(git rev-parse HEAD)
-          SHORT_SHA=$(git rev-parse --short HEAD)
-          VERSION="${TAG_PREFIX}-$(date +'%Y%m%d')-${SHORT_SHA}"
+          BUILD_TIMESTAMP=$(date -u +'%Y%m%d%H%M%S')
+          VERSION="${BUILD_TIMESTAMP}"
 
           echo "branch=$BRANCH_NAME" >> "$GITHUB_OUTPUT"
           echo "sha=$SHA" >> "$GITHUB_OUTPUT"
           echo "tag_prefix=$TAG_PREFIX" >> "$GITHUB_OUTPUT"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "Prepared Docker tags for $BRANCH_NAME at $SHORT_SHA"
+          echo "Prepared Docker tags for $BRANCH_NAME at $SHA"
 
   build_single_arch:
     name: Build & push (${{ matrix.arch }}) [native]
