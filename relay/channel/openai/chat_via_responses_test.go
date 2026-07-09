@@ -9,6 +9,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/dto"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
@@ -114,6 +115,61 @@ func TestOaiResponsesToChatBufferedStreamHandlerReturnsJSONFromSSE(t *testing.T)
 	require.Contains(t, got, `"name":"lookup"`)
 	require.Contains(t, got, `"arguments":"{\"q\":\"x\"}"`)
 	require.Contains(t, got, `"finish_reason":"tool_calls"`)
+}
+
+func TestOaiBufferedStreamHandlerReturnsChatCompletionJSONFromSSE(t *testing.T) {
+	oldMode := gin.Mode()
+	gin.SetMode(gin.TestMode)
+	t.Cleanup(func() { gin.SetMode(oldMode) })
+
+	body := strings.Join([]string{
+		`data: {"id":"chatcmpl_1","object":"chat.completion.chunk","created":1710000000,"model":"gpt-test","system_fingerprint":"fp_1","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}`,
+		`data: {"id":"chatcmpl_1","object":"chat.completion.chunk","created":1710000000,"model":"gpt-test","choices":[{"index":0,"delta":{"content":"hello "},"finish_reason":null}]}`,
+		`data: {"id":"chatcmpl_1","object":"chat.completion.chunk","created":1710000000,"model":"gpt-test","choices":[{"index":0,"delta":{"reasoning_content":"thought"},"finish_reason":null}]}`,
+		`data: {"id":"chatcmpl_1","object":"chat.completion.chunk","created":1710000000,"model":"gpt-test","choices":[{"index":0,"delta":{"content":"world"},"finish_reason":null}]}`,
+		`data: {"id":"chatcmpl_1","object":"chat.completion.chunk","created":1710000000,"model":"gpt-test","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"lookup"}}]},"finish_reason":null}]}`,
+		`data: {"id":"chatcmpl_1","object":"chat.completion.chunk","created":1710000000,"model":"gpt-test","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"q\":\"x\"}"}}]},"finish_reason":null}]}`,
+		`data: {"id":"chatcmpl_1","object":"chat.completion.chunk","created":1710000000,"model":"gpt-test","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}`,
+		`data: {"id":"chatcmpl_1","object":"chat.completion.chunk","created":1710000000,"model":"gpt-test","choices":[],"usage":{"prompt_tokens":2,"completion_tokens":3,"total_tokens":5}}`,
+		`data: [DONE]`,
+		``,
+	}, "\n")
+
+	c, recorder, resp, info := newResponsesChatTestContext(t, body, false)
+	info.BufferNonStreamStream = true
+	info.ClientStream = false
+	info.IsStream = true
+
+	usage, err := OaiBufferedStreamHandler(c, info, resp)
+	require.Nil(t, err)
+	require.NotNil(t, usage)
+	require.Equal(t, 2, usage.PromptTokens)
+	require.Equal(t, 3, usage.CompletionTokens)
+	require.Equal(t, 5, usage.TotalTokens)
+
+	require.Contains(t, recorder.Header().Get("Content-Type"), "application/json")
+	got := recorder.Body.String()
+	require.NotContains(t, got, "data:")
+
+	var parsed dto.OpenAITextResponse
+	require.NoError(t, common.Unmarshal(common.StringToByteSlice(got), &parsed))
+	require.Equal(t, "chatcmpl_1", parsed.Id)
+	require.Equal(t, "chat.completion", parsed.Object)
+	require.Equal(t, float64(1710000000), parsed.Created)
+	require.Equal(t, "gpt-test", parsed.Model)
+	require.NotNil(t, parsed.SystemFingerprint)
+	require.Equal(t, "fp_1", *parsed.SystemFingerprint)
+	require.Equal(t, 5, parsed.Usage.TotalTokens)
+	require.Len(t, parsed.Choices, 1)
+	require.Equal(t, "hello world", parsed.Choices[0].Message.StringContent())
+	require.NotNil(t, parsed.Choices[0].Message.ReasoningContent)
+	require.Equal(t, "thought", *parsed.Choices[0].Message.ReasoningContent)
+	require.Equal(t, "tool_calls", parsed.Choices[0].FinishReason)
+	toolCalls := parsed.Choices[0].Message.ParseToolCalls()
+	require.Len(t, toolCalls, 1)
+	require.Equal(t, "call_1", toolCalls[0].ID)
+	require.Equal(t, "lookup", toolCalls[0].Function.Name)
+	require.Equal(t, `{"q":"x"}`, toolCalls[0].Function.Arguments)
 }
 
 func TestOaiChatToResponsesStreamHandlerConvertsSSEOrderAndUsage(t *testing.T) {

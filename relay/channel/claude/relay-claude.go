@@ -1,6 +1,7 @@
 package claude
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -890,6 +891,196 @@ func ClaudeStreamHandler(c *gin.Context, resp *http.Response, info *relaycommon.
 	}
 
 	HandleStreamFinalResponse(c, info, claudeInfo)
+	return claudeInfo.Usage, nil
+}
+
+func ClaudeBufferedStreamHandler(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo) (*dto.Usage, *types.NewAPIError) {
+	if resp == nil || resp.Body == nil {
+		return nil, types.NewError(fmt.Errorf("invalid response"), types.ErrorCodeBadResponse)
+	}
+	defer service.CloseResponseBodyGracefully(resp)
+
+	claudeInfo := &ClaudeResponseInfo{
+		ResponseId:   helper.GetResponseID(c),
+		Created:      common.GetTimestamp(),
+		Model:        info.UpstreamModelName,
+		ResponseText: strings.Builder{},
+		Usage:        &dto.Usage{},
+	}
+	finalResponse := &dto.ClaudeResponse{
+		Id:      claudeInfo.ResponseId,
+		Type:    "message",
+		Role:    "assistant",
+		Model:   claudeInfo.Model,
+		Content: make([]dto.ClaudeMediaMessage, 0),
+	}
+	contentBlocks := make(map[int]*dto.ClaudeMediaMessage)
+	blockOrder := make([]int, 0)
+
+	scanner := helper.NewStreamScanner(resp.Body)
+	scanner.Split(bufio.ScanLines)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if !strings.HasPrefix(line, "data:") {
+			continue
+		}
+		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		if data == "" {
+			continue
+		}
+		if data == "[DONE]" {
+			break
+		}
+
+		var claudeResponse dto.ClaudeResponse
+		if err := common.UnmarshalJsonStr(data, &claudeResponse); err != nil {
+			return nil, types.NewError(err, types.ErrorCodeBadResponseBody)
+		}
+		if claudeError := claudeResponse.GetClaudeError(); claudeError != nil && claudeError.Type != "" {
+			return nil, types.WithClaudeError(*claudeError, http.StatusInternalServerError)
+		}
+		if claudeResponse.StopReason != "" {
+			maybeMarkClaudeRefusal(c, claudeResponse.StopReason)
+		}
+		if claudeResponse.Delta != nil && claudeResponse.Delta.StopReason != nil {
+			maybeMarkClaudeRefusal(c, *claudeResponse.Delta.StopReason)
+		}
+		FormatClaudeResponseInfo(&claudeResponse, nil, claudeInfo)
+
+		switch claudeResponse.Type {
+		case "message_start":
+			if claudeResponse.Message != nil {
+				finalResponse.Id = claudeResponse.Message.Id
+				finalResponse.Model = claudeResponse.Message.Model
+				finalResponse.Role = claudeResponse.Message.Role
+				if finalResponse.Role == "" {
+					finalResponse.Role = "assistant"
+				}
+				claudeInfo.ResponseId = claudeResponse.Message.Id
+				claudeInfo.Model = claudeResponse.Message.Model
+				info.UpstreamModelName = claudeResponse.Message.Model
+			}
+		case "content_block_start":
+			index := claudeResponse.GetIndex()
+			if _, exists := contentBlocks[index]; !exists {
+				contentBlocks[index] = &dto.ClaudeMediaMessage{}
+				blockOrder = append(blockOrder, index)
+			}
+			if claudeResponse.ContentBlock != nil {
+				block := *claudeResponse.ContentBlock
+				contentBlocks[index] = &block
+			}
+		case "content_block_delta":
+			index := claudeResponse.GetIndex()
+			block, exists := contentBlocks[index]
+			if !exists {
+				block = &dto.ClaudeMediaMessage{Type: "text"}
+				contentBlocks[index] = block
+				blockOrder = append(blockOrder, index)
+			}
+			if claudeResponse.Delta != nil {
+				if claudeResponse.Delta.Text != nil {
+					text := block.GetText() + *claudeResponse.Delta.Text
+					block.Text = &text
+				}
+				if claudeResponse.Delta.Thinking != nil {
+					thinking := ""
+					if block.Thinking != nil {
+						thinking = *block.Thinking
+					}
+					thinking += *claudeResponse.Delta.Thinking
+					block.Thinking = &thinking
+					if block.Type == "" {
+						block.Type = "thinking"
+					}
+				}
+				if claudeResponse.Delta.PartialJson != nil {
+					partial := ""
+					if current, ok := block.Input.(string); ok {
+						partial = current
+					}
+					block.Input = partial + *claudeResponse.Delta.PartialJson
+				}
+			}
+		case "message_delta":
+			if claudeResponse.Delta != nil && claudeResponse.Delta.StopReason != nil {
+				finalResponse.StopReason = *claudeResponse.Delta.StopReason
+			}
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, types.NewError(err, types.ErrorCodeBadResponse)
+	}
+
+	if claudeInfo.Usage.CompletionTokens == 0 || !claudeInfo.Done {
+		fallback := service.ResponseText2Usage(c, claudeInfo.ResponseText.String(), info.UpstreamModelName, info.GetEstimatePromptTokens())
+		if claudeInfo.Usage.CompletionTokens == 0 ||
+			(!claudeInfo.Done && fallback.CompletionTokens > claudeInfo.Usage.CompletionTokens) {
+			claudeInfo.Usage.CompletionTokens = fallback.CompletionTokens
+		}
+		if claudeInfo.Usage.PromptTokens == 0 {
+			claudeInfo.Usage.PromptTokens = fallback.PromptTokens
+		}
+		claudeInfo.Usage.TotalTokens = claudeInfo.Usage.PromptTokens + claudeInfo.Usage.CompletionTokens
+	}
+	if claudeInfo.Usage != nil {
+		claudeInfo.Usage.UsageSemantic = "anthropic"
+	}
+	finalResponse.Id = claudeInfo.ResponseId
+	finalResponse.Model = claudeInfo.Model
+	if finalResponse.Role == "" {
+		finalResponse.Role = "assistant"
+	}
+	finalResponse.Usage = &dto.ClaudeUsage{
+		InputTokens:              claudeInfo.Usage.PromptTokens,
+		OutputTokens:             claudeInfo.Usage.CompletionTokens,
+		CacheReadInputTokens:     claudeInfo.Usage.PromptTokensDetails.CachedTokens,
+		CacheCreationInputTokens: claudeInfo.Usage.PromptTokensDetails.CachedCreationTokens,
+	}
+	if claudeInfo.Usage.ClaudeCacheCreation5mTokens > 0 || claudeInfo.Usage.ClaudeCacheCreation1hTokens > 0 {
+		finalResponse.Usage.CacheCreation = &dto.ClaudeCacheCreationUsage{
+			Ephemeral5mInputTokens: claudeInfo.Usage.ClaudeCacheCreation5mTokens,
+			Ephemeral1hInputTokens: claudeInfo.Usage.ClaudeCacheCreation1hTokens,
+		}
+	}
+	for _, index := range blockOrder {
+		block := contentBlocks[index]
+		if block == nil {
+			continue
+		}
+		if block.Type == "tool_use" {
+			if input, ok := block.Input.(string); ok && strings.TrimSpace(input) != "" {
+				var parsedInput any
+				if err := common.Unmarshal(common.StringToByteSlice(input), &parsedInput); err == nil {
+					block.Input = parsedInput
+				}
+			}
+		}
+		finalResponse.Content = append(finalResponse.Content, *block)
+	}
+	if len(finalResponse.Content) == 0 {
+		text := claudeInfo.ResponseText.String()
+		finalResponse.Content = append(finalResponse.Content, dto.ClaudeMediaMessage{
+			Type: "text",
+			Text: &text,
+		})
+	}
+
+	var responseBody []byte
+	var err error
+	switch info.RelayFormat {
+	case types.RelayFormatOpenAI:
+		openaiResponse := ResponseClaude2OpenAI(finalResponse)
+		openaiResponse.Usage = buildOpenAIStyleUsageFromClaudeUsage(claudeInfo.Usage)
+		responseBody, err = common.Marshal(openaiResponse)
+	default:
+		responseBody, err = common.Marshal(finalResponse)
+	}
+	if err != nil {
+		return nil, types.NewError(err, types.ErrorCodeBadResponseBody)
+	}
+	resp.Header.Set("Content-Type", "application/json")
+	service.IOCopyBytesGracefully(c, resp, responseBody)
 	return claudeInfo.Usage, nil
 }
 

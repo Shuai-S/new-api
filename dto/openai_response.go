@@ -38,13 +38,14 @@ type OpenAITextResponseChoice struct {
 }
 
 type OpenAITextResponse struct {
-	Id      string                     `json:"id"`
-	Model   string                     `json:"model"`
-	Object  string                     `json:"object"`
-	Created any                        `json:"created"`
-	Choices []OpenAITextResponseChoice `json:"choices"`
-	Error   any                        `json:"error,omitempty"`
-	Usage   `json:"usage"`
+	Id                string                     `json:"id"`
+	Model             string                     `json:"model"`
+	Object            string                     `json:"object"`
+	Created           any                        `json:"created"`
+	Choices           []OpenAITextResponseChoice `json:"choices"`
+	Error             any                        `json:"error,omitempty"`
+	Usage             `json:"usage"`
+	SystemFingerprint *string `json:"system_fingerprint,omitempty"`
 }
 
 // GetOpenAIError 从动态错误类型中提取OpenAIError结构

@@ -278,6 +278,7 @@ const SENSITIVE_FORM_FIELDS = [
   'thinking_to_content',
   'proxy',
   'pass_through_body_enabled',
+  'upstream_stream_for_non_stream',
   'system_prompt',
   'system_prompt_override',
   'allow_service_tier',
@@ -331,6 +332,7 @@ function hasAdvancedSettingsValues(values: ChannelFormValues): boolean {
     values.force_format ||
     values.thinking_to_content ||
     values.pass_through_body_enabled ||
+    values.upstream_stream_for_non_stream ||
     values.system_prompt_override ||
     values.claude_beta_query ||
     values.upstream_model_update_check_enabled ||
@@ -720,6 +722,9 @@ export function ChannelMutateDrawer({
   const currentForceFormat = form.watch('force_format')
   const currentThinkingToContent = form.watch('thinking_to_content')
   const currentPassThroughBodyEnabled = form.watch('pass_through_body_enabled')
+  const currentUpstreamStreamForNonStream = form.watch(
+    'upstream_stream_for_non_stream'
+  )
   const currentDisableTaskPollingSleep = form.watch(
     'disable_task_polling_sleep'
   )
@@ -926,6 +931,7 @@ export function ChannelMutateDrawer({
     currentForceFormat ||
     currentThinkingToContent ||
     currentPassThroughBodyEnabled ||
+    currentUpstreamStreamForNonStream ||
     currentDisableTaskPollingSleep ||
     currentProxy?.trim() ||
     currentSystemPrompt?.trim() ||
@@ -3991,6 +3997,31 @@ export function ChannelMutateDrawer({
                                       <FormDescription>
                                         {t(
                                           'Pass request body directly to upstream'
+                                        )}
+                                      </FormDescription>
+                                    </div>
+                                    <FormControl>
+                                      <Switch
+                                        checked={field.value}
+                                        onCheckedChange={field.onChange}
+                                      />
+                                    </FormControl>
+                                  </FormItem>
+                                )}
+                              />
+
+                              <FormField
+                                control={form.control}
+                                name='upstream_stream_for_non_stream'
+                                render={({ field }) => (
+                                  <FormItem className='flex items-center justify-between px-4 py-3'>
+                                    <div className='space-y-0.5'>
+                                      <FormLabel>
+                                        {t('Stream upstream for non-stream requests')}
+                                      </FormLabel>
+                                      <FormDescription>
+                                        {t(
+                                          'Request upstream in stream mode, buffer the full result, then return a non-stream response'
                                         )}
                                       </FormDescription>
                                     </div>

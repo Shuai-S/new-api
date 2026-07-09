@@ -645,7 +645,9 @@ func (a *Adaptor) DoResponse(c *gin.Context, resp *http.Response, info *relaycom
 	case relayconstant.RelayModeResponsesCompact:
 		usage, err = OaiResponsesCompactionHandler(c, resp)
 	default:
-		if info.IsStream {
+		if info.BufferNonStreamStream && !info.ClientStream && info.IsStream {
+			usage, err = OaiBufferedStreamHandler(c, info, resp)
+		} else if info.IsStream {
 			usage, err = OaiStreamHandler(c, info, resp)
 		} else {
 			usage, err = OpenaiHandler(c, info, resp)
