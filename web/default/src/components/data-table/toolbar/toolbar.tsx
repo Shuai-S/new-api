@@ -17,7 +17,12 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import type { Table } from '@tanstack/react-table'
-import { ChevronDown, Loader2, X as Cross2Icon } from 'lucide-react'
+import {
+  ChevronDown,
+  Loader2,
+  Search as SearchIcon,
+  X as Cross2Icon,
+} from 'lucide-react'
 import * as React from 'react'
 import { useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -199,6 +204,7 @@ export function DataTableToolbar<TData>(props: DataTableToolbarProps<TData>) {
 
   React.useEffect(() => {
     if (
+      hasSearch ||
       searchDebounceMs <= 0 ||
       isSearchComposing ||
       debouncedSearchValue !== searchValue
@@ -210,13 +216,14 @@ export function DataTableToolbar<TData>(props: DataTableToolbarProps<TData>) {
   }, [
     commitSearchValue,
     debouncedSearchValue,
+    hasSearch,
     isSearchComposing,
     searchDebounceMs,
     searchValue,
   ])
 
   const queueSearchValue = (value: string) => {
-    if (searchDebounceMs <= 0) {
+    if (!hasSearch && searchDebounceMs <= 0) {
       commitSearchValue(value)
     }
   }
@@ -304,9 +311,18 @@ export function DataTableToolbar<TData>(props: DataTableToolbarProps<TData>) {
     )
   }
 
+  const handleSearchClick = () => {
+    commitSearchValue(searchValue)
+    props.onSearch?.()
+  }
+
   const searchButton = hasSearch ? (
-    <Button onClick={props.onSearch} disabled={props.searchLoading}>
-      {props.searchLoading && <Loader2 className='animate-spin' />}
+    <Button onClick={handleSearchClick} disabled={props.searchLoading}>
+      {props.searchLoading ? (
+        <Loader2 className='animate-spin' />
+      ) : (
+        <SearchIcon />
+      )}
       {t('Search')}
     </Button>
   ) : null

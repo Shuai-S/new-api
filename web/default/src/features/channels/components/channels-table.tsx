@@ -166,11 +166,13 @@ export function ChannelsTable() {
     onChange: onModelFilterInputChange,
     onCompositionStart: onModelFilterCompositionStart,
     onCompositionEnd: onModelFilterCompositionEnd,
+    commitInputValue: commitModelFilterInputValue,
     resetInput: resetModelFilterInput,
   } = useDebouncedColumnFilter({
     columnFilters,
     columnId: 'model',
     onColumnFiltersChange,
+    autoCommit: false,
   })
 
   // Determine whether to use search or regular list API
@@ -420,7 +422,10 @@ export function ChannelsTable() {
       applyHeaderSize
       toolbarProps={{
         searchPlaceholder: t('Filter by name, ID, or key...'),
-        searchDebounceMs: 500,
+        onSearch: () => {
+          commitModelFilterInputValue()
+        },
+        searchLoading: isFetching,
         onReset: () => {
           resetModelFilterInput()
         },

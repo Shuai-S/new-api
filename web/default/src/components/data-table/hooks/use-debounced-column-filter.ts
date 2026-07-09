@@ -26,6 +26,7 @@ type UseDebouncedColumnFilterOptions = {
   columnId: string
   onColumnFiltersChange: OnChangeFn<ColumnFiltersState>
   delay?: number
+  autoCommit?: boolean
 }
 
 export function useDebouncedColumnFilter({
@@ -33,6 +34,7 @@ export function useDebouncedColumnFilter({
   columnId,
   onColumnFiltersChange,
   delay = 500,
+  autoCommit = true,
 }: UseDebouncedColumnFilterOptions) {
   const value =
     (columnFilters.find((filter) => filter.id === columnId)?.value as
@@ -56,6 +58,7 @@ export function useDebouncedColumnFilter({
   }, [value])
 
   React.useEffect(() => {
+    if (!autoCommit) return
     if (debouncedValue === value) return
 
     onColumnFiltersChangeRef.current((previous) => {
@@ -64,7 +67,18 @@ export function useDebouncedColumnFilter({
         ? [...filters, { id: columnId, value: debouncedValue }]
         : filters
     })
-  }, [columnId, debouncedValue, value])
+  }, [autoCommit, columnId, debouncedValue, value])
+
+  const commitInputValue = React.useCallback(() => {
+    if (inputValue === value) return
+
+    onColumnFiltersChangeRef.current((previous) => {
+      const filters = previous.filter((filter) => filter.id !== columnId)
+      return inputValue
+        ? [...filters, { id: columnId, value: inputValue }]
+        : filters
+    })
+  }, [columnId, inputValue, value])
 
   const updateInputValue = React.useCallback((nextValue: string) => {
     setInputValue(nextValue)
@@ -108,6 +122,7 @@ export function useDebouncedColumnFilter({
     onChange: handleChange,
     onCompositionStart: handleCompositionStart,
     onCompositionEnd: handleCompositionEnd,
+    commitInputValue,
     resetInput,
   }
 }
