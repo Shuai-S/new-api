@@ -250,6 +250,28 @@ export function DataTableToolbar<TData>(props: DataTableToolbarProps<TData>) {
     queueSearchValue(value)
   }
 
+  const handleSearch = () => {
+    if (props.searchLoading) return
+
+    commitSearchValue(searchValue)
+    props.onSearch?.()
+  }
+
+  const handleToolbarKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (
+      !hasSearch ||
+      event.key !== 'Enter' ||
+      isSearchComposing ||
+      event.nativeEvent.isComposing ||
+      !(event.target instanceof HTMLInputElement)
+    ) {
+      return
+    }
+
+    event.preventDefault()
+    handleSearch()
+  }
+
   const searchInput = (
     <Input
       placeholder={placeholder}
@@ -311,13 +333,8 @@ export function DataTableToolbar<TData>(props: DataTableToolbarProps<TData>) {
     )
   }
 
-  const handleSearchClick = () => {
-    commitSearchValue(searchValue)
-    props.onSearch?.()
-  }
-
   const searchButton = hasSearch ? (
-    <Button onClick={handleSearchClick} disabled={props.searchLoading}>
+    <Button onClick={handleSearch} disabled={props.searchLoading}>
       {props.searchLoading ? (
         <Loader2 className='animate-spin' />
       ) : (
@@ -359,7 +376,10 @@ export function DataTableToolbar<TData>(props: DataTableToolbarProps<TData>) {
 
   if (hasLeftActions) {
     return (
-      <div className={cn('flex flex-col gap-2', props.className)}>
+      <div
+        className={cn('flex flex-col gap-2', props.className)}
+        onKeyDown={handleToolbarKeyDown}
+      >
         <div className='flex flex-wrap items-center gap-2 sm:gap-3'>
           {props.customSearch !== undefined ? props.customSearch : searchInput}
           {props.additionalSearch}
@@ -391,6 +411,7 @@ export function DataTableToolbar<TData>(props: DataTableToolbarProps<TData>) {
 
   return (
     <div
+      onKeyDown={handleToolbarKeyDown}
       className={cn(
         'flex flex-wrap items-center gap-2 sm:gap-3',
         props.className
