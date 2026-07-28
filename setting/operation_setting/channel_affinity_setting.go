@@ -53,15 +53,11 @@ var claudeCliPassThroughHeaders = []string{
 	"X-Stainless-Runtime",
 	"X-Stainless-Runtime-Version",
 	"X-Stainless-Timeout",
-	"X-Stainless-Helper-Method",
 	"User-Agent",
 	"X-App",
 	"Anthropic-Beta",
 	"Anthropic-Dangerous-Direct-Browser-Access",
 	"Anthropic-Version",
-	"X-Claude-Code-Session-Id",
-	"X-Claude-Code-Agent-Id",
-	"X-Client-Request-Id",
 }
 
 func buildPassHeaderTemplate(headers []string) map[string]interface{} {

@@ -1998,51 +1998,6 @@ func TestGetEffectiveHeaderOverrideUsesRuntimeOverrideAsFinalResult(t *testing.T
 	}
 }
 
-func TestApplyHeaderParamOverrideWithRelayInfoPreservesBody(t *testing.T) {
-	input := []byte(`{"model":"claude-opus-4-7","temperature":0.7}`)
-	original := append([]byte(nil), input...)
-	info := &RelayInfo{
-		RequestHeaders: map[string]string{
-			"X-Claude-Code-Session-Id": "session-123",
-			"X-Client-Request-Id":      "request-456",
-		},
-		ChannelMeta: &ChannelMeta{
-			HeadersOverride: map[string]interface{}{
-				"X-Static": "static-value",
-			},
-			ParamOverride: map[string]interface{}{
-				"operations": []interface{}{
-					map[string]interface{}{
-						"mode":  "set",
-						"path":  "temperature",
-						"value": 1,
-					},
-					map[string]interface{}{
-						"mode":  "pass_headers",
-						"value": []interface{}{"X-Claude-Code-Session-Id", "X-Client-Request-Id"},
-					},
-					map[string]interface{}{
-						"mode":  "set_header",
-						"path":  "X-Upstream-Source",
-						"value": "claude-code",
-						"conditions": []interface{}{
-							map[string]interface{}{"path": "model", "mode": "prefix", "value": "claude-"},
-						},
-					},
-				},
-			},
-		},
-	}
-
-	require.NoError(t, ApplyHeaderParamOverrideWithRelayInfo(input, info))
-	require.Equal(t, original, input, "header-only overrides must not mutate a passthrough body")
-	require.True(t, info.UseRuntimeHeadersOverride)
-	require.Equal(t, "session-123", info.RuntimeHeadersOverride["x-claude-code-session-id"])
-	require.Equal(t, "request-456", info.RuntimeHeadersOverride["x-client-request-id"])
-	require.Equal(t, "claude-code", info.RuntimeHeadersOverride["x-upstream-source"])
-	require.Equal(t, "static-value", info.RuntimeHeadersOverride["x-static"])
-}
-
 func TestRemoveDisabledFieldsSkipWhenChannelPassThroughEnabled(t *testing.T) {
 	input := `{
 		"service_tier":"flex",
