@@ -202,6 +202,52 @@ func ApplyParamOverrideWithRelayInfo(jsonData []byte, info *RelayInfo) ([]byte, 
 	return result, nil
 }
 
+// ApplyHeaderParamOverrideWithRelayInfo applies only operations that affect
+// upstream request headers. It is used by body-passthrough paths, where the
+// original request body must remain byte-for-byte unchanged.
+func ApplyHeaderParamOverrideWithRelayInfo(jsonData []byte, info *RelayInfo) error {
+	paramOverride := getParamOverrideMap(info)
+	if len(paramOverride) == 0 {
+		return nil
+	}
+
+	operations, ok := tryParseOperations(paramOverride)
+	if !ok {
+		if _, exists := paramOverride["operations"]; exists {
+			return fmt.Errorf("invalid operations")
+		}
+		return nil
+	}
+
+	headerOperations := make([]ParamOperation, 0, len(operations))
+	for _, operation := range operations {
+		switch operation.Mode {
+		case "set_header", "delete_header", "copy_header", "move_header", "pass_headers":
+			headerOperations = append(headerOperations, operation)
+		}
+	}
+	if len(headerOperations) == 0 {
+		return nil
+	}
+
+	overrideCtx := BuildParamOverrideContext(info)
+	var recorder *paramOverrideAuditRecorder
+	if shouldEnableParamOverrideAudit(paramOverride) {
+		recorder = &paramOverrideAuditRecorder{}
+		overrideCtx[paramOverrideContextAuditRecorder] = recorder
+	}
+	if _, err := applyOperations(jsonData, headerOperations, overrideCtx); err != nil {
+		return err
+	}
+	syncRuntimeHeaderOverrideFromContext(info, overrideCtx)
+	if recorder != nil {
+		info.ParamOverrideAudit = recorder.lines
+	} else {
+		info.ParamOverrideAudit = nil
+	}
+	return nil
+}
+
 func shouldEnableParamOverrideAudit(paramOverride map[string]interface{}) bool {
 	if common.DebugEnabled {
 		return true
