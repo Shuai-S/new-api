@@ -49,7 +49,7 @@ func matchesKeywords(message string, keywords []string) bool {
 
 func keywordsFromString(s string) []string {
 	keywords := []string{}
-	for _, keyword := range strings.Split(s, "\n") {
+	for keyword := range strings.SplitSeq(s, "\n") {
 		keyword = strings.TrimSpace(keyword)
 		keyword = strings.ToLower(keyword)
 		if keyword != "" {
