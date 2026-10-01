@@ -20,58 +20,6 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-type bufferedChoice struct {
-	role         string
-	content      strings.Builder
-	reasoning    strings.Builder
-	finishReason string
-	toolCalls    map[int]*dto.ToolCallResponse
-	toolOrder    []int
-}
-
-func (c *bufferedChoice) appendToolCall(delta dto.ToolCallResponse) {
-	if c.toolCalls == nil {
-		c.toolCalls = make(map[int]*dto.ToolCallResponse)
-	}
-	index := 0
-	if delta.Index != nil {
-		index = *delta.Index
-	} else if len(c.toolOrder) > 0 {
-		index = c.toolOrder[len(c.toolOrder)-1]
-	}
-	tool, ok := c.toolCalls[index]
-	if !ok {
-		tool = &dto.ToolCallResponse{}
-		c.toolCalls[index] = tool
-		c.toolOrder = append(c.toolOrder, index)
-	}
-	if delta.ID != "" {
-		tool.ID = delta.ID
-	}
-	if delta.Type != nil {
-		tool.Type = delta.Type
-	}
-	if delta.Function.Name != "" {
-		tool.Function.Name += delta.Function.Name
-	}
-	if delta.Function.Arguments != "" {
-		tool.Function.Arguments += delta.Function.Arguments
-	}
-}
-
-func (c *bufferedChoice) sortedToolCalls() []dto.ToolCallResponse {
-	if len(c.toolOrder) == 0 {
-		return nil
-	}
-	tools := make([]dto.ToolCallResponse, 0, len(c.toolOrder))
-	for _, index := range c.toolOrder {
-		if tool := c.toolCalls[index]; tool != nil {
-			tools = append(tools, *tool)
-		}
-	}
-	return tools
-}
-
 func sendStreamData(c *gin.Context, info *relaycommon.RelayInfo, data string, forceFormat bool, thinkToContent bool) error {
 	if data == "" {
 		return nil
@@ -153,98 +101,56 @@ func sendStreamData(c *gin.Context, info *relaycommon.RelayInfo, data string, fo
 	return helper.ObjectData(c, lastStreamResponse)
 }
 
-func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.Usage, *types.NewAPIError) {
-	if resp == nil || resp.Body == nil {
-		logger.LogError(c, "invalid response or response body")
-		return nil, types.NewOpenAIError(fmt.Errorf("invalid response"), types.ErrorCodeBadResponse, http.StatusInternalServerError)
+type bufferedChoice struct {
+	role         string
+	content      strings.Builder
+	reasoning    strings.Builder
+	finishReason string
+	toolCalls    map[int]*dto.ToolCallResponse
+	toolOrder    []int
+}
+
+func (c *bufferedChoice) appendToolCall(delta dto.ToolCallResponse) {
+	if c.toolCalls == nil {
+		c.toolCalls = make(map[int]*dto.ToolCallResponse)
 	}
-
-	defer service.CloseResponseBodyGracefully(resp)
-
-	model := info.UpstreamModelName
-	var responseId string
-	var createAt int64 = 0
-	var systemFingerprint string
-	var containStreamUsage bool
-	var responseTextBuilder strings.Builder
-	var toolCount int
-	var usage = &dto.Usage{}
-	var lastStreamData string
-	var secondLastStreamData string // 保留倒数第二个stream data；部分兼容网关把完整usage放在倒数第二个事件
-	seenStreamToolCalls := make(map[string]struct{})
-	var streamFunctionCallNames []string
-
-	helper.StreamScannerHandler(c, resp, info, func(data string, sr *helper.StreamResult) {
-		if lastStreamData != "" {
-			if err := HandleStreamFormat(c, info, lastStreamData, info.ChannelSetting.ForceFormat, info.ChannelSetting.ThinkingToContent); err != nil {
-				common.SysLog("error handling stream format: " + err.Error())
-				sr.Error(err)
-			}
-		}
-		if len(data) > 0 {
-			if lastStreamData != "" {
-				secondLastStreamData = lastStreamData
-			}
-
-			lastStreamData = data
-			collectStreamFunctionCallNames(data, seenStreamToolCalls, &streamFunctionCallNames)
-			if err := processTokenData(info.RelayMode, data, &responseTextBuilder, &toolCount); err != nil {
-				logger.LogError(c, "error processing stream token data: "+err.Error())
-				sr.Error(err)
-			}
-		}
-	})
-
-	// 处理最后的响应
-	shouldSendLastResp := true
-	if err := handleLastResponse(lastStreamData, &responseId, &createAt, &systemFingerprint, &model, &usage,
-		&containStreamUsage, info, &shouldSendLastResp); err != nil {
-		logger.LogError(c, fmt.Sprintf("error handling last response: %s, lastStreamData: [%s]", err.Error(), lastStreamData))
+	index := 0
+	if delta.Index != nil {
+		index = *delta.Index
+	} else if len(c.toolOrder) > 0 {
+		index = c.toolOrder[len(c.toolOrder)-1]
 	}
+	tool, ok := c.toolCalls[index]
+	if !ok {
+		tool = &dto.ToolCallResponse{}
+		c.toolCalls[index] = tool
+		c.toolOrder = append(c.toolOrder, index)
+	}
+	if delta.ID != "" {
+		tool.ID = delta.ID
+	}
+	if delta.Type != nil {
+		tool.Type = delta.Type
+	}
+	if delta.Function.Name != "" {
+		tool.Function.Name += delta.Function.Name
+	}
+	if delta.Function.Arguments != "" {
+		tool.Function.Arguments += delta.Function.Arguments
+	}
+}
 
-	// 部分兼容网关把完整的累计usage附在倒数第二个事件上，随后发送一个空的最后事件。
-	// 仅当最后一个事件没有有效usage时，回退到倒数第二个事件的完整快照。
-	usageFrame := lastStreamData
-	if !containStreamUsage && secondLastStreamData != "" {
-		var streamResp struct {
-			Usage *dto.Usage `json:"usage"`
-		}
-		err := common.Unmarshal([]byte(secondLastStreamData), &streamResp)
-		if err == nil && streamResp.Usage != nil &&
-			streamResp.Usage.PromptTokens > 0 &&
-			(streamResp.Usage.CompletionTokens > 0 || streamResp.Usage.TotalTokens > 0) {
-			usage = dto.MergeUsageNonZero(usage, streamResp.Usage)
-			containStreamUsage = true
-			usageFrame = secondLastStreamData
-
-			if common.DebugEnabled {
-				logger.LogDebug(c, "usage extracted from second last SSE: PromptTokens=%d, CompletionTokens=%d, TotalTokens=%d, InputTokens=%d, OutputTokens=%d",
-					usage.PromptTokens, usage.CompletionTokens, usage.TotalTokens,
-					usage.InputTokens, usage.OutputTokens)
-			}
+func (c *bufferedChoice) sortedToolCalls() []dto.ToolCallResponse {
+	if len(c.toolOrder) == 0 {
+		return nil
+	}
+	tools := make([]dto.ToolCallResponse, 0, len(c.toolOrder))
+	for _, index := range c.toolOrder {
+		if tool := c.toolCalls[index]; tool != nil {
+			tools = append(tools, *tool)
 		}
 	}
-
-	if info.RelayFormat == types.RelayFormatOpenAI {
-		if shouldSendLastResp {
-			_ = sendStreamData(c, info, lastStreamData, info.ChannelSetting.ForceFormat, info.ChannelSetting.ThinkingToContent)
-		}
-	}
-
-	if !containStreamUsage {
-		usage = service.ResponseText2Usage(c, responseTextBuilder.String(), info.UpstreamModelName, info.GetEstimatePromptTokens())
-		usage.CompletionTokens += toolCount * 7
-	}
-
-	applyUsagePostProcessing(info, usage, common.StringToByteSlice(usageFrame))
-
-	for _, name := range streamFunctionCallNames {
-		info.CountBillableToolCall(dto.BuildInCallFunctionCall, name)
-	}
-
-	HandleFinalResponse(c, info, lastStreamData, responseId, createAt, model, systemFingerprint, usage, containStreamUsage)
-
-	return usage, nil
+	return tools
 }
 
 func OaiBufferedStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.Usage, *types.NewAPIError) {
@@ -395,12 +301,116 @@ func OaiBufferedStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp 
 	return usage, nil
 }
 
-func collectStreamFunctionCallNames(data string, seen map[string]struct{}, names *[]string) {
+func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.Usage, *types.NewAPIError) {
+	if resp == nil || resp.Body == nil {
+		logger.LogError(c, "invalid response or response body")
+		return nil, types.NewOpenAIError(fmt.Errorf("invalid response"), types.ErrorCodeBadResponse, http.StatusInternalServerError)
+	}
+
+	defer service.CloseResponseBodyGracefully(resp)
+
+	model := info.UpstreamModelName
+	var responseId string
+	var createAt int64 = 0
+	var systemFingerprint string
+	var containStreamUsage bool
+	var responseTextBuilder strings.Builder
+	var toolCount int
+	var usage = &dto.Usage{}
+	var lastStreamData string
+	var secondLastStreamData string // 保留倒数第二个stream data；部分兼容网关把完整usage放在倒数第二个事件
+	seenStreamToolCalls := make(map[string]struct{})
+	var streamFunctionCallNames []string
+
+	helper.StreamScannerHandler(c, resp, info, func(data string, sr *helper.StreamResult) {
+		if lastStreamData != "" {
+			if err := HandleStreamFormat(c, info, lastStreamData, info.ChannelSetting.ForceFormat, info.ChannelSetting.ThinkingToContent); err != nil {
+				common.SysLog("error handling stream format: " + err.Error())
+				sr.Error(err)
+			}
+		}
+		if len(data) > 0 {
+			if lastStreamData != "" {
+				secondLastStreamData = lastStreamData
+			}
+
+			lastStreamData = data
+			observeStreamChoices(info, data, seenStreamToolCalls, &streamFunctionCallNames)
+			if err := processTokenData(info, data, &responseTextBuilder, &toolCount); err != nil {
+				logger.LogError(c, "error processing stream token data: "+err.Error())
+				sr.Error(err)
+			}
+		}
+	})
+
+	info.StreamStatus.RequireTerminal()
+
+	// 处理最后的响应
+	shouldSendLastResp := true
+	if err := handleLastResponse(lastStreamData, &responseId, &createAt, &systemFingerprint, &model, &usage,
+		&containStreamUsage, info, &shouldSendLastResp); err != nil {
+		logger.LogError(c, fmt.Sprintf("error handling last response: %s, lastStreamData: [%s]", err.Error(), lastStreamData))
+	}
+
+	// 部分兼容网关把完整的累计usage附在倒数第二个事件上，随后发送一个空的最后事件。
+	// 仅当最后一个事件没有有效usage时，回退到倒数第二个事件的完整快照。
+	usageFrame := lastStreamData
+	if !containStreamUsage && secondLastStreamData != "" {
+		var streamResp struct {
+			Usage *dto.Usage `json:"usage"`
+		}
+		err := common.Unmarshal([]byte(secondLastStreamData), &streamResp)
+		if err == nil && streamResp.Usage != nil &&
+			streamResp.Usage.PromptTokens > 0 &&
+			(streamResp.Usage.CompletionTokens > 0 || streamResp.Usage.TotalTokens > 0) {
+			usage = dto.MergeUsageNonZero(usage, streamResp.Usage)
+			containStreamUsage = true
+			usageFrame = secondLastStreamData
+
+			if common.DebugEnabled {
+				logger.LogDebug(c, "usage extracted from second last SSE: PromptTokens=%d, CompletionTokens=%d, TotalTokens=%d, InputTokens=%d, OutputTokens=%d",
+					usage.PromptTokens, usage.CompletionTokens, usage.TotalTokens,
+					usage.InputTokens, usage.OutputTokens)
+			}
+		}
+	}
+
+	if info.RelayFormat == types.RelayFormatOpenAI {
+		if shouldSendLastResp {
+			_ = sendStreamData(c, info, lastStreamData, info.ChannelSetting.ForceFormat, info.ChannelSetting.ThinkingToContent)
+		}
+	}
+
+	if !containStreamUsage {
+		usage = service.ResponseText2Usage(c, responseTextBuilder.String(), info.UpstreamModelName, info.GetEstimatePromptTokens())
+		usage.CompletionTokens += toolCount * 7
+	}
+
+	applyUsagePostProcessing(info, usage, common.StringToByteSlice(usageFrame))
+
+	for _, name := range streamFunctionCallNames {
+		info.CountBillableToolCall(dto.BuildInCallFunctionCall, name)
+	}
+
+	HandleFinalResponse(c, info, lastStreamData, responseId, createAt, model, systemFingerprint, usage, containStreamUsage)
+
+	return usage, nil
+}
+
+// observeStreamChoices collects billable function call names and records the
+// finish reason facts used by health sampling from one parsed chunk.
+func observeStreamChoices(info *relaycommon.RelayInfo, data string, seen map[string]struct{}, names *[]string) {
 	var streamResponse dto.ChatCompletionsStreamResponse
 	if err := common.UnmarshalJsonStr(data, &streamResponse); err != nil {
 		return
 	}
 	for _, choice := range streamResponse.Choices {
+		if choice.FinishReason != nil && *choice.FinishReason != "" {
+			if *choice.FinishReason == constant.FinishReasonContentFilter {
+				info.PerformanceBusinessRejection = true
+			}
+			info.StreamStatus.MarkCompleted()
+		}
 		for i, tc := range choice.Delta.ToolCalls {
 			name := strings.TrimSpace(tc.Function.Name)
 			if name == "" {
@@ -473,8 +483,10 @@ func OpenaiHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Respo
 		return nil, types.WithOpenAIError(*oaiError, resp.StatusCode)
 	}
 
+	info.ObserveResponseModel(simpleResponse.Model)
 	for _, choice := range simpleResponse.Choices {
 		if choice.FinishReason == constant.FinishReasonContentFilter {
+			info.PerformanceBusinessRejection = true
 			common.SetContextKey(c, constant.ContextKeyAdminRejectReason, "openai_finish_reason=content_filter")
 			break
 		}
