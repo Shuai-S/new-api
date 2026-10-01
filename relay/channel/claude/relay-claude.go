@@ -362,10 +362,10 @@ func ClaudeBufferedStreamHandler(c *gin.Context, resp *http.Response, info *rela
 			return nil, types.WithClaudeError(*claudeError, http.StatusInternalServerError)
 		}
 		if claudeResponse.StopReason != "" {
-			maybeMarkClaudeRefusal(c, claudeResponse.StopReason)
+			maybeMarkClaudeRefusal(c, info, claudeResponse.StopReason)
 		}
 		if claudeResponse.Delta != nil && claudeResponse.Delta.StopReason != nil {
-			maybeMarkClaudeRefusal(c, *claudeResponse.Delta.StopReason)
+			maybeMarkClaudeRefusal(c, info, *claudeResponse.Delta.StopReason)
 		}
 		FormatClaudeResponseInfo(&claudeResponse, nil, claudeInfo)
 
