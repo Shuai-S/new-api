@@ -16,62 +16,15 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import assert from 'node:assert/strict'
-import { after, describe, test } from 'node:test'
-
 import type { Table } from '@tanstack/react-table'
-import { Window } from 'happy-dom'
+import { fireEvent, render, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { useState } from 'react'
+import { describe, expect, it, vi } from 'vitest'
 
-const domWindow = new Window()
-const domGlobals = [
-  'window',
-  'document',
-  'navigator',
-  'HTMLElement',
-  'HTMLInputElement',
-  'Node',
-  'Element',
-  'Event',
-  'CustomEvent',
-  'KeyboardEvent',
-  'MutationObserver',
-  'requestAnimationFrame',
-  'cancelAnimationFrame',
-  'getComputedStyle',
-] as const
+import { Input } from '@/components/ui/input'
 
-for (const key of domGlobals) {
-  Object.defineProperty(globalThis, key, {
-    configurable: true,
-    value: domWindow[key],
-  })
-}
-
-const { act } = await import('react')
-const { createRoot } = await import('react-dom/client')
-const i18next = (await import('i18next')).default
-const { initReactI18next } = await import('react-i18next')
-await i18next.use(initReactI18next).init({
-  lng: 'en',
-  resources: {
-    en: {
-      translation: {
-        Search: 'Search',
-        Reset: 'Reset',
-      },
-    },
-  },
-})
-const { DataTableToolbar } = await import('../toolbar')
-const reactTestGlobals = globalThis as typeof globalThis & {
-  IS_REACT_ACT_ENVIRONMENT?: boolean
-}
-reactTestGlobals.IS_REACT_ACT_ENVIRONMENT = true
-
-type RenderedToolbar = {
-  container: HTMLDivElement
-  root: ReturnType<typeof createRoot>
-}
+import { DataTableToolbar } from '../toolbar'
 
 function createTable() {
   let globalFilter = ''
@@ -89,127 +42,93 @@ function createTable() {
   return { table, committedValues }
 }
 
-async function renderToolbar(
-  table: Table<unknown>,
-  onSearch: () => void,
-  additionalSearch?: React.ReactNode
-): Promise<RenderedToolbar> {
-  const container = document.createElement('div')
-  document.body.append(container)
-  const root = createRoot(container)
+function AdditionalSearchFixture(props: {
+  table: Table<unknown>
+  onSearch: () => void
+  onSearchedModel: (value: string) => void
+}) {
+  const [modelValue, setModelValue] = useState('')
+  return (
+    <DataTableToolbar
+      table={props.table}
+      searchPlaceholder='Filter channels'
+      onSearch={() => {
+        props.onSearch()
+        props.onSearchedModel(modelValue)
+      }}
+      additionalSearch={
+        <Input
+          aria-label='Model filter'
+          value={modelValue}
+          onChange={(event) => setModelValue(event.target.value)}
+        />
+      }
+      hideViewOptions
+    />
+  )
+}
 
-  await act(async () => {
-    root.render(
+describe('DataTableToolbar search submission', () => {
+  it('pressing Enter in the primary input commits the draft and searches', async () => {
+    const user = userEvent.setup()
+    const { table, committedValues } = createTable()
+    const onSearch = vi.fn()
+    render(
       <DataTableToolbar
         table={table}
         searchPlaceholder='Filter channels'
         onSearch={onSearch}
-        additionalSearch={additionalSearch}
         hideViewOptions
       />
     )
+    const input = screen.getByPlaceholderText('Filter channels')
+
+    await user.type(input, 'openai')
+    expect(committedValues).toEqual([])
+
+    await user.type(input, '{Enter}')
+    expect(committedValues).toEqual(['openai'])
+    expect(onSearch).toHaveBeenCalledTimes(1)
   })
 
-  return { container, root }
-}
-
-async function setInputValue(input: HTMLInputElement, value: string) {
-  await act(async () => {
-    const valueSetter = Object.getOwnPropertyDescriptor(
-      HTMLInputElement.prototype,
-      'value'
-    )?.set
-    valueSetter?.call(input, value)
-    input.dispatchEvent(new Event('input', { bubbles: true }))
-  })
-}
-
-async function pressEnter(input: HTMLInputElement, isComposing = false) {
-  const event = new KeyboardEvent('keydown', {
-    key: 'Enter',
-    bubbles: true,
-    cancelable: true,
-  })
-  if (isComposing) {
-    Object.defineProperty(event, 'isComposing', { value: true })
-  }
-  await act(async () => input.dispatchEvent(event))
-  return event
-}
-
-async function unmountToolbar(rendered: RenderedToolbar) {
-  await act(async () => rendered.root.unmount())
-  rendered.container.remove()
-}
-
-describe('DataTableToolbar search submission', () => {
-  after(() => {
-    domWindow.close()
-  })
-
-  test('pressing Enter in the primary input commits the draft and searches', async () => {
+  it('pressing Enter in an additional input invokes the same search action', async () => {
+    const user = userEvent.setup()
     const { table, committedValues } = createTable()
-    let searchCount = 0
-    const rendered = await renderToolbar(table, () => {
-      searchCount += 1
-    })
-    const input = rendered.container.querySelector<HTMLInputElement>(
-      'input[placeholder="Filter channels"]'
-    )
-
-    assert.ok(input)
-    await setInputValue(input, 'openai')
-    const event = await pressEnter(input)
-
-    assert.equal(event.defaultPrevented, true)
-    assert.deepEqual(committedValues, ['openai'])
-    assert.equal(searchCount, 1)
-    await unmountToolbar(rendered)
-  })
-
-  test('pressing Enter in an additional input invokes the same search action', async () => {
-    const { table } = createTable()
-    let modelValue = ''
+    const onSearch = vi.fn()
     const searchedModels: string[] = []
-    const rendered = await renderToolbar(
-      table,
-      () => searchedModels.push(modelValue),
-      <input
-        aria-label='Model filter'
-        onInput={(event) => {
-          modelValue = event.currentTarget.value
-        }}
+    render(
+      <AdditionalSearchFixture
+        table={table}
+        onSearch={onSearch}
+        onSearchedModel={(value) => searchedModels.push(value)}
       />
     )
-    const input = rendered.container.querySelector<HTMLInputElement>(
-      'input[aria-label="Model filter"]'
-    )
+    const input = screen.getByLabelText('Model filter')
 
-    assert.ok(input)
-    await setInputValue(input, 'gpt-5')
-    await pressEnter(input)
+    await user.type(input, 'gpt-5')
+    await user.type(input, '{Enter}')
 
-    assert.deepEqual(searchedModels, ['gpt-5'])
-    await unmountToolbar(rendered)
+    expect(searchedModels).toEqual(['gpt-5'])
+    expect(onSearch).toHaveBeenCalledTimes(1)
   })
 
-  test('pressing Enter during IME composition does not search', async () => {
+  it('pressing Enter during IME composition does not search', async () => {
     const { table, committedValues } = createTable()
-    let searchCount = 0
-    const rendered = await renderToolbar(table, () => {
-      searchCount += 1
-    })
-    const input = rendered.container.querySelector<HTMLInputElement>(
-      'input[placeholder="Filter channels"]'
+    const onSearch = vi.fn()
+    render(
+      <DataTableToolbar
+        table={table}
+        searchPlaceholder='Filter channels'
+        onSearch={onSearch}
+        hideViewOptions
+      />
     )
+    const input = screen.getByPlaceholderText('Filter channels')
 
-    assert.ok(input)
-    await setInputValue(input, '渠道')
-    const event = await pressEnter(input, true)
+    fireEvent.change(input, { target: { value: '渠道' } })
+    fireEvent.keyDown(input, { key: 'Enter', isComposing: true })
 
-    assert.equal(event.defaultPrevented, false)
-    assert.deepEqual(committedValues, [])
-    assert.equal(searchCount, 0)
-    await unmountToolbar(rendered)
+    expect(committedValues).toEqual([])
+    expect(onSearch).not.toHaveBeenCalled()
   })
 })
