@@ -93,7 +93,7 @@ describe('DataTableToolbar search submission', () => {
 
   it('pressing Enter in an additional input invokes the same search action', async () => {
     const user = userEvent.setup()
-    const { table, committedValues } = createTable()
+    const { table } = createTable()
     const onSearch = vi.fn()
     const searchedModels: string[] = []
     render(
