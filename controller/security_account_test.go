@@ -15,12 +15,12 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/textproto"
-	"regexp"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/MoeForge/moego/regexp"
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/model"
@@ -645,7 +645,9 @@ func TestSecurityAccountEmailConfirmationAndAudit(t *testing.T) {
 			require.NoError(t, err)
 			assert.Contains(t, string(encoded), "user.binding_bind")
 			assert.NotContains(t, string(encoded), flow.FlowToken)
-			assert.NotContains(t, string(encoded), newCode)
+			// Audit event and request IDs are long runs of time digits that can
+			// contain the six-digit code by chance; only the whole code is a leak.
+			assert.NotRegexp(t, `(^|\D)`+newCode+`(\D|$)`, string(encoded))
 		})
 	}
 }
