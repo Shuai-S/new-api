@@ -350,6 +350,46 @@ func TestLogTaskConsumptionIncludesTieredSnapshotUsageFacts(t *testing.T) {
 	assert.Contains(t, log.Content, "seconds: 5")
 }
 
+// Token columns and latency used to stay empty for every task log even when a
+// tiered expression billed real usage; they must mirror the snapshot facts.
+func TestLogTaskConsumptionFillsTokenColumnsFromSnapshot(t *testing.T) {
+	truncate(t)
+	const userID, channelID = 42, 42
+	seedUser(t, userID, 10_000)
+	seedChannel(t, channelID)
+
+	task := makeTask(userID, channelID, 100, 0, BillingSourceWallet, 0)
+	info := &relaycommon.RelayInfo{
+		UserId:          userID,
+		TokenId:         0,
+		OriginModelName: "gpt-image-2",
+		UsingGroup:      "default",
+		ChannelMeta:     &relaycommon.ChannelMeta{ChannelId: channelID},
+		TaskRelayInfo:   &relaycommon.TaskRelayInfo{Action: "generate"},
+		PriceData: types.PriceData{
+			ModelPrice:     0.0527,
+			Quota:          26350,
+			GroupRatioInfo: types.GroupRatioInfo{GroupRatio: 1},
+		},
+		TieredBillingSnapshot: &billingexpr.BillingSnapshot{
+			ExprString:    `u("input_tokens")*5/1000000 + u("image_input_tokens")*8/1000000 + u("output_tokens")*30/1000000`,
+			EstimatedTier: "",
+			UsageFacts: map[string]any{
+				"input_tokens":       float64(8),
+				"image_input_tokens": float64(0),
+				"output_tokens":      float64(1756),
+				"image_count":        float64(1),
+			},
+		},
+	}
+
+	log := callLogTaskConsumption(t, info, task)
+
+	assert.Equal(t, 8, log.PromptTokens)
+	assert.Equal(t, 1756, log.CompletionTokens)
+	assert.GreaterOrEqual(t, log.UseTime, 0)
+}
+
 func TestLogTaskConsumptionWithoutSnapshotKeepsRatioMode(t *testing.T) {
 	truncate(t)
 	const userID, channelID = 41, 41

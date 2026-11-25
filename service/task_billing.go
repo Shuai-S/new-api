@@ -7,6 +7,7 @@ import (
 	"maps"
 	"math"
 	"strings"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -82,15 +83,31 @@ func LogTaskConsumption(c *gin.Context, info *relaycommon.RelayInfo, task *model
 		other.SetAdmin("request_plugins", info.RequestPluginSteps)
 	}
 	appendRequestPluginRecord(info, other)
+	// Token columns and request latency: task logs previously left both empty,
+	// so the log list showed "-" and 0s even when a tiered expression billed
+	// real usage. Prompt = text + image input facts, completion = output facts,
+	// mirroring what the HTTP image relay records on the same model.
+	var promptTokens, completionTokens int
+	if snap := info.TieredBillingSnapshot; snap != nil {
+		promptTokens = int(math.Round(taskUsageFact(snap.UsageFacts, "input_tokens") + taskUsageFact(snap.UsageFacts, "image_input_tokens")))
+		completionTokens = int(math.Round(taskUsageFact(snap.UsageFacts, "output_tokens")))
+	}
+	useTimeSeconds := time.Now().Unix() - info.StartTime.Unix()
+	if useTimeSeconds < 0 {
+		useTimeSeconds = 0
+	}
 	model.RecordConsumeLog(c, info.UserId, model.RecordConsumeLogParams{
-		ChannelId: info.ChannelId,
-		ModelName: info.OriginModelName,
-		TokenName: tokenName,
-		Quota:     info.PriceData.Quota,
-		Content:   logContent,
-		TokenId:   info.TokenId,
-		Group:     info.UsingGroup,
-		Other:     other,
+		ChannelId:        info.ChannelId,
+		PromptTokens:     promptTokens,
+		CompletionTokens: completionTokens,
+		UseTimeSeconds:   int(useTimeSeconds),
+		ModelName:        info.OriginModelName,
+		TokenName:        tokenName,
+		Quota:            info.PriceData.Quota,
+		Content:          logContent,
+		TokenId:          info.TokenId,
+		Group:            info.UsingGroup,
+		Other:            other,
 	})
 	model.UpdateUserUsedQuotaAndRequestCount(info.UserId, info.PriceData.Quota)
 	model.UpdateChannelUsedQuota(info.ChannelId, info.PriceData.Quota)
@@ -453,4 +470,14 @@ func EvaluateTaskCompletionUsage(snap *billingexpr.BillingSnapshot, facts map[st
 		err = fmt.Errorf("task completion expression produced an invalid cost")
 	}
 	return result, usage, err
+}
+
+// taskUsageFact reads a non-negative numeric usage fact; missing or invalid
+// facts count as zero.
+func taskUsageFact(facts map[string]any, key string) float64 {
+	value, ok := facts[key].(float64)
+	if !ok || value < 0 {
+		return 0
+	}
+	return value
 }

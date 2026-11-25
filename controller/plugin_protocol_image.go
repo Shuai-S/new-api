@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"strings"
 	"time"
@@ -158,9 +159,11 @@ func serveTaskPluginImageProtocol(c *gin.Context, pinned pluginruntime.PinnedEnd
 		}
 		response["created"] = createdAt
 	}
-	// response_format is host-owned: the plugin renders upstream URLs and the
-	// host inlines each image when the client asked for Base64.
-	if taskPluginImageResponseFormat(protocolRequest) == "b64_json" {
+	// response_format is host-owned: the plugin always renders upstream URLs.
+	// Official gpt-image models take no response_format parameter and always
+	// answer b64_json, so the host inlines the image unless the client
+	// explicitly asked for a URL. A failed download keeps the URL.
+	if taskPluginImageResponseFormat(protocolRequest) != "url" {
 		for _, entry := range data {
 			item, isObject := entry.(map[string]any)
 			if !isObject {
@@ -176,6 +179,14 @@ func serveTaskPluginImageProtocol(c *gin.Context, pinned pluginruntime.PinnedEnd
 				continue
 			}
 			item["b64_json"] = encoded
+		}
+	}
+	// Surface the plugin's token facts as the official Images API usage object
+	// so downstream clients see real usage. Facts live in the plugin's submit
+	// state; per-call plugins without token facts get no usage object.
+	if usage := taskPluginImageUsage(task); usage != nil {
+		if _, present := response["usage"]; !present {
+			response["usage"] = usage
 		}
 	}
 	c.JSON(http.StatusOK, response)
@@ -238,6 +249,52 @@ func taskPluginImageResponseFormat(request pluginruntime.ProtocolRequestContext)
 		}
 	}
 	return ""
+}
+
+// taskPluginImageUsage converts the token facts a task plugin stored in its
+// submit state into the official Images API usage object. It returns nil when
+// the state carries no token usage, e.g. per-call image-count plugins, or when
+// the stored state is not a JSON object.
+func taskPluginImageUsage(task *model.Task) map[string]any {
+	if task == nil || len(task.PrivateData.PluginState) == 0 {
+		return nil
+	}
+	var facts map[string]any
+	if err := common.Unmarshal(task.PrivateData.PluginState, &facts); err != nil {
+		return nil
+	}
+	input := taskPluginUsageFact(facts["input_tokens"])
+	imageInput := taskPluginUsageFact(facts["image_input_tokens"])
+	output := taskPluginUsageFact(facts["output_tokens"])
+	if input <= 0 && output <= 0 {
+		return nil
+	}
+	usage := map[string]any{
+		"input_tokens":  int(math.Round(input)),
+		"output_tokens": int(math.Round(output)),
+		"total_tokens":  int(math.Round(input + output)),
+	}
+	if input > 0 {
+		text := input - imageInput
+		if text < 0 {
+			text = 0
+		}
+		usage["input_tokens_details"] = map[string]any{
+			"image_tokens": int(math.Round(imageInput)),
+			"text_tokens":  int(math.Round(text)),
+		}
+	}
+	return usage
+}
+
+// taskPluginUsageFact reads a non-negative numeric usage fact; missing or
+// invalid facts count as zero.
+func taskPluginUsageFact(value any) float64 {
+	number, ok := value.(float64)
+	if !ok || number < 0 {
+		return 0
+	}
+	return number
 }
 
 // respondTaskPluginImageError writes an OpenAI error envelope for the Images

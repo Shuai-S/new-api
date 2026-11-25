@@ -3,6 +3,7 @@ package controller
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -1675,7 +1676,8 @@ func TestServeTaskPluginImageProtocolRendersImmediateResultAndInlinesBase64(t *t
 		downloadErr          error
 		wantB64              []any
 	}{
-		{"url", "", nil, []any{nil, nil}},
+		{"omitted format inlines base64 like official gpt-image", "", nil, []any{"QUFB", "QUFB"}},
+		{"explicit url keeps the URL", "url", nil, []any{nil, nil}},
 		{"b64_json", "b64_json", nil, []any{"QUFB", "QUFB"}},
 		{"b64_json download failure keeps the URL", "b64_json", errors.New("blocked"), []any{nil, nil}},
 	} {
@@ -1708,11 +1710,53 @@ func TestServeTaskPluginImageProtocolRendersImmediateResultAndInlinesBase64(t *t
 				assert.Equal(t, fmt.Sprintf("https://cdn.example/%d.png", index+1), item["url"])
 				assert.Equal(t, tc.wantB64[index], item["b64_json"])
 			}
-			if tc.responseFormat == "b64_json" {
-				assert.Equal(t, 2, downloads)
-			} else {
+			if tc.responseFormat == "url" {
 				assert.Zero(t, downloads)
+			} else {
+				assert.Equal(t, 2, downloads)
 			}
+		})
+	}
+}
+
+// taskPluginImageUsage must surface the plugin's token facts as the official
+// Images API usage object and stay silent for per-call plugins.
+func TestTaskPluginImageUsageBuildsOfficialObject(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		state     string
+		expectNil bool
+		expected  map[string]any
+	}{
+		{
+			name:  "text-only generation",
+			state: `{"input_tokens":8,"image_input_tokens":0,"output_tokens":1756,"image_count":1}`,
+			expected: map[string]any{
+				"input_tokens": 8, "output_tokens": 1756, "total_tokens": 1764,
+				"input_tokens_details": map[string]any{"image_tokens": 0, "text_tokens": 8},
+			},
+		},
+		{
+			name:  "edit with image input tokens",
+			state: `{"input_tokens":773,"image_input_tokens":765,"output_tokens":1200}`,
+			expected: map[string]any{
+				"input_tokens": 773, "output_tokens": 1200, "total_tokens": 1973,
+				"input_tokens_details": map[string]any{"image_tokens": 765, "text_tokens": 8},
+			},
+		},
+		{name: "per-call facts get no usage", state: `{"image_count":1}`, expectNil: true},
+		{name: "invalid state json", state: `not-json`, expectNil: true},
+		{name: "empty state", state: ``, expectNil: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			task := &model.Task{PrivateData: model.TaskPrivateData{PluginState: json.RawMessage(tc.state)}}
+			usage := taskPluginImageUsage(task)
+			if tc.expectNil {
+				assert.Nil(t, usage)
+				return
+			}
+			require.NotNil(t, usage)
+			assert.Equal(t, tc.expected, usage)
 		})
 	}
 }
@@ -1747,7 +1791,7 @@ func TestServeTaskPluginImageProtocolAppliesChannelOverrides(t *testing.T) {
 		{name: "force replaces URL", clientFormat: "url", overrides: []string{force}, wantB64: true},
 		{name: "keep origin preserves URL", clientFormat: "url", overrides: []string{keep}},
 		{name: "keep origin fills missing format", overrides: []string{keep}, wantB64: true},
-		{name: "unmatched condition", overrides: []string{strings.Replace(force, `"value":"seedream"`, `"value":"other"`, 1)}},
+		{name: "unmatched condition falls back to the b64 default", overrides: []string{strings.Replace(force, `"value":"seedream"`, `"value":"other"`, 1)}, wantB64: true},
 		{name: "condition uses mapped model", overrides: []string{strings.Replace(strings.Replace(force, `"original_model"`, `"model"`, 1), `"value":"seedream"`, `"value":"5-0-lite"`, 1)}, wantB64: true},
 		{name: "legacy override", overrides: []string{`{"response_format":"b64_json"}`}, wantB64: true},
 		{name: "multipart edit preserves upload", multipart: true, overrides: []string{`{"response_format":"b64_json","seed":7}`}, wantB64: true},
@@ -1755,16 +1799,16 @@ func TestServeTaskPluginImageProtocolAppliesChannelOverrides(t *testing.T) {
 		{name: "retry starts from original request", overrides: []string{
 			`{"response_format":"b64_json","operations":[{"mode":"append","path":"prompt","value":" first"}]}`,
 			`{"operations":[{"mode":"append","path":"prompt","value":" second"}]}`,
-		}, prompts: []string{"a cat first", "a cat second"}},
+		}, prompts: []string{"a cat first", "a cat second"}, wantB64: true},
 		{name: "retry without rules restores client format", clientFormat: "b64_json", overrides: []string{`{"response_format":"url"}`, `{}`}, wantB64: true},
 		{name: "decoder rejects overridden count", overrides: []string{`{"n":129}`}, wantStatus: 400, wantCode: "plugin_request_invalid"},
 		{name: "decoder rejects overridden format", overrides: []string{`{"response_format":"invalid"}`}, wantStatus: 400, wantCode: "plugin_request_invalid"},
 		{name: "model pin cannot change", overrides: []string{`{"model":"another-model"}`}, wantStatus: 400, wantCode: "channel_param_override_invalid", wantNoRetry: true},
 		{name: "invalid rule stops submission", overrides: []string{`{"operations":[{"mode":"invalid","path":"response_format"}]}`}, wantStatus: 400, wantCode: "channel_param_override_invalid", wantNoRetry: true},
 		{name: "return error stops submission", overrides: []string{`{"operations":[{"mode":"return_error","value":{"message":"blocked by image rule","status_code":429,"code":"image_rule_blocked"}}]}`}, wantStatus: 429, wantCode: "image_rule_blocked", wantNoRetry: true},
-		{name: "alibaba/no overrides preserves URL", pluginKey: "alibaba", overrides: []string{`{}`}},
+		{name: "alibaba/no overrides inlines base64 like official gpt-image", pluginKey: "alibaba", overrides: []string{`{}`}, wantB64: true},
 		{name: "alibaba/client Base64 without overrides", pluginKey: "alibaba", clientFormat: "b64_json", overrides: []string{`{}`}, wantB64: true},
-		{name: "alibaba/Seedream condition does not match", pluginKey: "alibaba", overrides: []string{force}},
+		{name: "alibaba/Seedream condition does not match falls back to b64", pluginKey: "alibaba", overrides: []string{force}, wantB64: true},
 		{name: "alibaba/original alias condition", pluginKey: "alibaba", model: "bailian-image", overrides: []string{bailian}, wantB64: true},
 		{name: "alibaba/mapped model condition", pluginKey: "alibaba", model: "bailian-image", overrides: []string{strings.Replace(strings.Replace(force, `"original_model"`, `"model"`, 1), `"value":"seedream"`, `"value":"qwen-image"`, 1)}, wantB64: true},
 		{name: "alibaba/force replaces URL", pluginKey: "alibaba", clientFormat: "url", overrides: []string{`{"response_format":"b64_json"}`}, wantB64: true},
