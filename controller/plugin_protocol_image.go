@@ -159,18 +159,24 @@ func serveTaskPluginImageProtocol(c *gin.Context, pinned pluginruntime.PinnedEnd
 		}
 		response["created"] = createdAt
 	}
-	// response_format is host-owned: the plugin always renders upstream URLs.
-	// Official gpt-image models take no response_format parameter and always
-	// answer b64_json, so the host inlines the image unless the client
-	// explicitly asked for a URL. A failed download keeps the URL.
+	// response_format is host-owned and strict: every image carries exactly
+	// one of b64_json or url, matching the official single-field shape. The
+	// official default is b64_json, so without an explicit request format the
+	// host inlines the image and drops the URL; an explicit url keeps only
+	// the URL and drops any volunteered base64. A failed download keeps the
+	// URL as the only usable payload.
 	if taskPluginImageResponseFormat(protocolRequest) != "url" {
 		for _, entry := range data {
 			item, isObject := entry.(map[string]any)
 			if !isObject {
 				continue
 			}
+			if existing, _ := item["b64_json"].(string); existing != "" {
+				delete(item, "url")
+				continue
+			}
 			url, _ := item["url"].(string)
-			if existing, _ := item["b64_json"].(string); strings.TrimSpace(url) == "" || existing != "" {
+			if strings.TrimSpace(url) == "" {
 				continue
 			}
 			_, encoded, downloadErr := deps.downloadImage(url)
@@ -179,6 +185,17 @@ func serveTaskPluginImageProtocol(c *gin.Context, pinned pluginruntime.PinnedEnd
 				continue
 			}
 			item["b64_json"] = encoded
+			delete(item, "url")
+		}
+	} else {
+		for _, entry := range data {
+			item, isObject := entry.(map[string]any)
+			if !isObject {
+				continue
+			}
+			if url, _ := item["url"].(string); strings.TrimSpace(url) != "" {
+				delete(item, "b64_json")
+			}
 		}
 	}
 	// Surface the plugin's token facts as the official Images API usage object

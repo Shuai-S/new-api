@@ -1618,7 +1618,7 @@ export function parseTaskResult(){return {status:"SUCCESS"};}
 export const protocols = {openai_image: {
   decodeRequest: function(ctx) { return {kind:"submit", model: ctx.model, requestBody: ctx.body.value}; },
   render: function(ctx, task) {
-    const data = (task.data && task.data.images || []).map(function(url) { return {url: url}; });
+    const data = (task.data && task.data.images || []).map(function(entry) { return entry && typeof entry === "object" ? entry : {url: entry}; });
     return {data: data, vendor: "test"};
   },
 }};
@@ -1668,18 +1668,20 @@ func imageProtocolTestOutcome(info *relaycommon.RelayInfo, status model.TaskStat
 }
 
 // The OpenAI Images protocol answers synchronously: an immediate result is
-// rendered by the plugin, `created` is host-filled, and response_format
-// b64_json inlines each URL while keeping the URL.
+// rendered by the plugin, `created` is host-filled, and response_format is
+// strict: b64_json inlines each URL and drops it, an explicit url keeps only
+// the URL, and a failed download keeps the URL as the only payload.
 func TestServeTaskPluginImageProtocolRendersImmediateResultAndInlinesBase64(t *testing.T) {
 	for _, tc := range []struct {
 		name, responseFormat string
 		downloadErr          error
-		wantB64              []any
+		wantB64, wantURL     []any
+		wantDownloads        int
 	}{
-		{"omitted format inlines base64 like official gpt-image", "", nil, []any{"QUFB", "QUFB"}},
-		{"explicit url keeps the URL", "url", nil, []any{nil, nil}},
-		{"b64_json", "b64_json", nil, []any{"QUFB", "QUFB"}},
-		{"b64_json download failure keeps the URL", "b64_json", errors.New("blocked"), []any{nil, nil}},
+		{"omitted format inlines base64 like official gpt-image", "", nil, []any{"QUFB", "QUFB"}, []any{nil, nil}, 2},
+		{"explicit url keeps only the URL", "url", nil, []any{nil, nil}, []any{"https://cdn.example/1.png", "https://cdn.example/2.png"}, 0},
+		{"b64_json", "b64_json", nil, []any{"QUFB", "QUFB"}, []any{nil, nil}, 2},
+		{"b64_json download failure keeps the URL", "b64_json", errors.New("blocked"), []any{nil, nil}, []any{"https://cdn.example/1.png", "https://cdn.example/2.png"}, 2},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			pinned := imageProtocolTestEndpoint(t)
@@ -1707,13 +1709,57 @@ func TestServeTaskPluginImageProtocolRendersImmediateResultAndInlinesBase64(t *t
 			require.Len(t, data, 2)
 			for index, entry := range data {
 				item := entry.(map[string]any)
-				assert.Equal(t, fmt.Sprintf("https://cdn.example/%d.png", index+1), item["url"])
+				assert.Equal(t, tc.wantURL[index], item["url"])
 				assert.Equal(t, tc.wantB64[index], item["b64_json"])
 			}
-			if tc.responseFormat == "url" {
-				assert.Zero(t, downloads)
-			} else {
-				assert.Equal(t, 2, downloads)
+			assert.Equal(t, tc.wantDownloads, downloads)
+		})
+	}
+}
+
+// A vendor may volunteer both url and b64_json on one image. The protocol
+// returns exactly the client-requested format: the redundant field is
+// dropped and no download runs when base64 is already present.
+func TestServeTaskPluginImageProtocolDropsRedundantFields(t *testing.T) {
+	for _, tc := range []struct {
+		name, responseFormat string
+	}{
+		{"b64 mode keeps only b64_json", ""},
+		{"explicit url mode keeps only url", "url"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			pinned := imageProtocolTestEndpoint(t)
+			c, recorder := newImageProtocolTestContext(tc.responseFormat)
+			deps := pluginProtocolTestDeps()
+			deps.downloadImage = func(url string) (string, string, error) {
+				t.Fatal("unexpected download: the vendor already returned base64")
+				return "", "", nil
+			}
+			deps.submit = func(_ *gin.Context, info *relaycommon.RelayInfo) (*taskSubmissionOutcome, *dto.TaskError) {
+				task := &model.Task{TaskID: "task_image", Platform: constant.TaskPlatform("image-bridge"), UserId: info.UserId, ChannelId: 3, Status: model.TaskStatusSuccess, CreatedAt: 1_710_000_000}
+				task.PrivateData.UpstreamTaskID = "vendor"
+				task.SetData(map[string]any{"images": []any{
+					map[string]any{"url": "https://cdn.example/1.png", "b64_json": "VENDORED"},
+					map[string]any{"url": "https://cdn.example/2.png", "b64_json": "VENDORED"},
+				}})
+				return &taskSubmissionOutcome{Result: &relay.TaskSubmitResult{}, Task: task, RelayInfo: info}, nil
+			}
+			serveTaskPluginImageProtocol(c, pinned, deps)
+			require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+			var response map[string]any
+			require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+			data, ok := response["data"].([]any)
+			require.True(t, ok)
+			require.Len(t, data, 2)
+			for index, entry := range data {
+				item := entry.(map[string]any)
+				if tc.responseFormat == "url" {
+					assert.Equal(t, fmt.Sprintf("https://cdn.example/%d.png", index+1), item["url"])
+					assert.Nil(t, item["b64_json"])
+				} else {
+					assert.Equal(t, "VENDORED", item["b64_json"])
+					assert.Nil(t, item["url"])
+				}
 			}
 		})
 	}
@@ -2014,13 +2060,15 @@ func TestServeTaskPluginImageProtocolAppliesChannelOverrides(t *testing.T) {
 			}
 			require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
 			require.Len(t, response.Data, 1)
-			wantB64, wantDownloads := "", 0
+			wantB64, wantDownloads, wantURL := "", 0, ""
 			if tc.wantB64 {
 				wantB64, wantDownloads = "QUFB", 1
+			} else {
+				wantURL = "https://cdn.example/image.png"
 			}
 			assert.Equal(t, wantDownloads, downloads)
 			assert.Equal(t, wantB64, response.Data[0].B64)
-			assert.Equal(t, "https://cdn.example/image.png", response.Data[0].URL)
+			assert.Equal(t, wantURL, response.Data[0].URL)
 			if pluginKey == "alibaba" {
 				assert.Contains(t, response.Metadata, "output", "vendor metadata remains available with Base64 output")
 				usage, ok := response.Metadata["usage"].(map[string]any)

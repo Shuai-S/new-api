@@ -3016,3 +3016,17 @@ export function buildContentRequest(ctx) {
 		})
 	}
 }
+
+// submitReplyLimit grants the 64 MB reply window to the OpenAI Images
+// protocol endpoint the same way it does to retainResult: false native
+// routes: the immediate result is delivered once and never persisted.
+func TestSubmitReplyLimitForOpenAIImageProtocolEndpoint(t *testing.T) {
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	assert.Equal(t, int64(maxTaskPluginPersistedJSONBytes), submitReplyLimit(c))
+
+	c.Set(pluginruntime.ContextKeyPinnedEndpoint, pluginruntime.PinnedEndpoint{Protocol: pluginruntime.ProtocolOpenAIImage})
+	assert.Equal(t, max(maxInlineFileBytes(), maxTaskPluginPersistedJSONBytes), submitReplyLimit(c))
+
+	c.Set(pluginruntime.ContextKeyPinnedEndpoint, pluginruntime.PinnedEndpoint{Protocol: "openai_responses"})
+	assert.Equal(t, int64(maxTaskPluginPersistedJSONBytes), submitReplyLimit(c))
+}

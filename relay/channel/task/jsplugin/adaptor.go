@@ -675,10 +675,18 @@ func relaysSubmitEvents(c *gin.Context) bool {
 // submitReplyLimit bounds the submit reply and each of its SSE events. A
 // native route that declares retainResult: false delivers the reply once and
 // never persists it, so it may be as large as a downloaded file, which lets a
-// vendor return Base64 images.
+// vendor return Base64 images. The OpenAI Images protocol endpoint behaves
+// the same way: the client receives the images inline in the same response
+// and an immediate result is discarded instead of persisted, so its reply
+// may also carry inline Base64.
 func submitReplyLimit(c *gin.Context) int64 {
 	if value, exists := c.Get(pluginruntime.ContextKeyPinnedRoute); exists {
 		if pinned, ok := value.(pluginruntime.PinnedRoute); ok && pinned.Route.RetainResult != nil && !*pinned.Route.RetainResult {
+			return max(maxInlineFileBytes(), maxTaskPluginPersistedJSONBytes)
+		}
+	}
+	if value, exists := c.Get(pluginruntime.ContextKeyPinnedEndpoint); exists {
+		if pinned, ok := value.(pluginruntime.PinnedEndpoint); ok && pinned.Protocol == pluginruntime.ProtocolOpenAIImage {
 			return max(maxInlineFileBytes(), maxTaskPluginPersistedJSONBytes)
 		}
 	}
